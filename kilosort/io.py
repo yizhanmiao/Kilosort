@@ -513,7 +513,10 @@ def load_ops(ops_path, device=None):
     ops = np.load(ops_path, allow_pickle=True).item()
     for k, v in ops.items():
         if k in ops['is_tensor']:
-            ops[k] = torch.from_numpy(v).to(device)
+            if device.type == "mps":
+                ops[k] = torch.from_numpy(v).to(torch.float32).to(device)
+            else:
+                ops[k] = torch.from_numpy(v).to(device)
     # TODO: Why do we have one copy of this saved as numpy, one as tensor,
     #       at different levels?
     ops['preprocessing'] = {k: torch.from_numpy(v).to(device)

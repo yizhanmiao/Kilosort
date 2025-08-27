@@ -131,9 +131,10 @@ def get_highpass_filter(fs=30000, cutoff=300, device=torch.device('cuda')):
 
     # symmetric filter from scipy
     hp_filter = filtfilt(b, a , x).copy()
-    
-    hp_filter = torch.from_numpy(hp_filter).to(device).float()
-    return hp_filter
+    if device.type == "mps": # MPS does not support float64 at this moment
+        return torch.from_numpy(hp_filter.astype('float32')).to(device).float()
+    else:
+        return torch.from_numpy(hp_filter).to(device).float()
 
 def fft_highpass(hp_filter, NT=30122):
     """Convert filter to fourier domain."""

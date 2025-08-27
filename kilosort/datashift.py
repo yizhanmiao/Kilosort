@@ -73,7 +73,10 @@ def align_block2(F, ysamp, ops, device=torch.device('cuda')):
     dt = np.arange(-n,n+1,1)
 
     # batch fingerprints are mean subtracted along depth
-    Fg = torch.from_numpy(F).to(device).float() 
+    if device.type == "mps":
+        Fg = torch.from_numpy(F).to(torch.float32).to(device).float() 
+    else:
+        Fg = torch.from_numpy(F).to(device).float() 
     Fg = Fg - Fg.mean(1).unsqueeze(1)
 
     # the template fingerprint is initialized with batch 300 if that exists
@@ -217,7 +220,10 @@ def run(ops, bfile, device=torch.device('cuda'), progress_bar=None,
 
     # for interpolation, we precompute a radial kernel based on distances between sites
     Kxx = kernel2D(xp, xp, ops['sig_interp'])
-    Kxx = torch.from_numpy(Kxx).to(device)
+    if device.type == "mps":
+        Kxx = torch.from_numpy(Kxx).to(torch.float32).to(device)
+    else:
+        Kxx = torch.from_numpy(Kxx).to(device)
 
     # a small constant is added to the diagonal for stability of the matrix inversion
     ops['iKxx'] = torch.linalg.inv(Kxx + 0.01 * torch.eye(Kxx.shape[0], device=device))

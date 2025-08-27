@@ -112,8 +112,12 @@ def Mstats(M, device=torch.device('cuda')):
     ki = m * ki/ki.sum()
     kj = m * kj/kj.sum()
 
-    ki = torch.from_numpy(ki).to(device)
-    kj = torch.from_numpy(kj).to(device)
+    if device.type == "mps":
+        ki = torch.from_numpy(ki).to(torch.float32).to(device)
+        kj = torch.from_numpy(kj).to(torch.float32).to(device)
+    else:
+        ki = torch.from_numpy(ki).to(device)
+        kj = torch.from_numpy(kj).to(device)
     
     return m, ki, kj
 
@@ -135,7 +139,10 @@ def cluster(Xd, iclust=None, kn=None, nskip=1, n_neigh=10, max_sub=25000,
         log_performance(logger, header='clustering_qr.cluster, after Mstats')
 
     Xg = Xd.to(device)
-    kn = torch.from_numpy(kn).to(device)
+    if device.type == "mps":
+        kn = torch.from_numpy(kn).to(torch.float32).to(device)
+    else:
+        kn = torch.from_numpy(kn).to(device)
     n_spikes, n_neigh = kn.shape
     nsub = M.shape[1]  # number of spikes in neighbor-finding subset
 
@@ -193,7 +200,10 @@ def kmeans_plusplus(Xg, niter=200, seed=1, device=torch.device('cuda'), verbose=
         # using this to sample some spikes, so it's fine to not use all of them.
         n2 = n1 - 2**24   # number of spikes to remove before sampling
         idx, rev_idx = subsample_idx(n1, n2)
-        rev_idx = torch.from_numpy(rev_idx).to(device)
+        if device.type == "mps":
+            rev_idx = torch.from_numpy(rev_idx).to(torch.float32).to(device)
+        else:
+            rev_idx = torch.from_numpy(rev_idx).to(device)
         subsample = True
     else:
         subsample = False

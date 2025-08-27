@@ -221,7 +221,7 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
                             'Specify `device` to change this.')
                 device = torch.device('cpu')
 
-        if device != torch.device('cpu'):
+        if device.type == 'cuda':
             memory = torch.cuda.get_device_properties(device).total_memory/1024**3
             logger.info(f'Using CUDA device: {torch.cuda.get_device_name()} {memory:.2f}GB')
 

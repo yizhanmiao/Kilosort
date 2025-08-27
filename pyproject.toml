@@ -1,0 +1,35 @@
+[project]
+authors = [{name = "Yizhan Miao", email = "yizhanmiao@pm.me"}]
+name = "Kilosort"
+requires-python = ">= 3.11"
+version = "0.1.0"
+dependencies = ["numba>=0.61.2,<0.62"]
+
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[tool.pixi.workspace]
+channels = ["pytorch-nightly", "conda-forge"]
+platforms = ["osx-arm64"]
+
+[tool.pixi.pypi-dependencies]
+kilosort = { path = ".", editable = true }
+
+[tool.pixi.tasks]
+
+[tool.pixi.dependencies]
+pytorch = ">=2.6.0.dev20241112,<3"
+torchvision = ">=0.20.0.dev20241118,<0.21"
+torchaudio = ">=2.5.0.dev20241118,<3"
+numpy = ">=1.24,<2"
+scipy = ">=1.16.1,<2"
+scikit-learn = ">=1.3.1,<2"
+tqdm = ">=4.67.1,<5"
+libblas = ">=3.9.0,<4"
+matplotlib = ">=3.10.5,<4"
+pip = ">=25.2,<26"
+ipykernel = ">=6.30.1,<7"
+probeinterface = ">=0.3.0,<0.4"
+psycopg2 = ">=2.9.10,<3"
+pandas = ">=2.3.1,<3"
