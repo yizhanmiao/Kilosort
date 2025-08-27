@@ -137,3 +137,6 @@ tests/.test_data/*
 
 # docs/ copy of README
 docs/README.md
+# pixi environments
+.pixi/*
+!.pixi/config.toml

@@ -1,0 +1,30 @@
+[project]
+dependencies = [
+    "numpy>=1.20.0",
+    "scipy",
+    "scikit-learn",
+    "tqdm",
+    "torch>=2.8.0",
+    "numba",
+    "faiss-cpu>=1.9,<1.10",
+    "psutil",
+    "matplotlib",
+]
+name = "Kilosort"
+requires-python = ">= 3.9, <3.12"
+version = "4.1.1"
+
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-arm64"]
+
+[tool.pixi.pypi-dependencies]
+kilosort = { path = ".", editable = true }
+
+[tool.pixi.tasks]
+
+[tool.pixi.dependencies]
