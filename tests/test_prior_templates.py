@@ -2,6 +2,7 @@ import importlib
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 # `kilosort.run_kilosort` as an attribute is the function (kilosort/__init__.py
@@ -41,13 +42,17 @@ def test_cluster_with_prior_keeps_ids_and_offsets_new(monkeypatch):
     assert len(st_out) == len(tF_out) == 4
 
 
-def test_cluster_with_prior_drops_unclusterable_new_spikes(monkeypatch):
+@pytest.mark.parametrize('msg', [
+    'Wall is empty after `clustering_qr.run`, cannot continue clustering.',
+    '`get_data_cpu` never found suitable channels in `clustering_qr.run`.',
+])
+def test_cluster_with_prior_drops_unclusterable_new_spikes(monkeypatch, msg):
     prior = torch.ones((2, 4, 2))
     st = _st([0, 2, 1])
     tF = torch.ones((3, 2, 2))
 
     def failing_cluster_spikes(*a, **kw):
-        raise ValueError('Wall is empty after `clustering_qr.run`')
+        raise ValueError(msg)
     monkeypatch.setattr(rk, 'cluster_spikes', failing_cluster_spikes)
 
     clu, Wall, st_out, tF_out = rk.cluster_spikes_with_prior(
@@ -62,3 +67,17 @@ def test_prior_dir_for_shank():
     assert rk._prior_dir_for_shank(None, 1) is None
     assert rk._prior_dir_for_shank('/a/b', None) == Path('/a/b')
     assert rk._prior_dir_for_shank('/a/b', 2) == Path('/a/b/shank_2')
+
+
+def test_cluster_with_prior_propagates_unrelated_value_error(monkeypatch):
+    prior = torch.ones((2, 4, 2))
+    st = _st([0, 2, 1])
+    tF = torch.ones((3, 2, 2))
+
+    def failing_cluster_spikes(*a, **kw):
+        raise ValueError('something unrelated')
+    monkeypatch.setattr(rk, 'cluster_spikes', failing_cluster_spikes)
+
+    with pytest.raises(ValueError, match='something unrelated'):
+        rk.cluster_spikes_with_prior(
+            st, tF, _ops(3), prior, torch.device('cpu'), bfile=None)

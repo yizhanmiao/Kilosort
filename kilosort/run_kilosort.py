@@ -1035,6 +1035,12 @@ def cluster_spikes_with_prior(st, tF, ops, prior_Wall, device, bfile,
                 verbose=verbose
                 )
         except ValueError as e:
+            # Only the "nothing to cluster" errors raised on purpose by
+            # `clustering_qr.run`; anything else is a real bug.
+            if not any(m in str(e) for m in (
+                    'Wall is empty', '`get_data_cpu` never found suitable channels'
+                    )):
+                raise
             logger.warning(f'Could not cluster {int(new.sum())} spikes that did '
                            f'not match previous units ({e}); dropping them.')
             keep = torch.from_numpy(is_prior)
@@ -1042,7 +1048,7 @@ def cluster_spikes_with_prior(st, tF, ops, prior_Wall, device, bfile,
             Wall_new = torch.zeros((0, *prior_Wall.shape[1:]))
         else:
             st[new] = st_new
-            tF[new_t] = tF_new
+            tF[new_t] = tF_new  # updates the caller's tF in place
             clu[new] = clu_new + N
 
     Wall = torch.cat((Wall_prior.to(device), Wall_new.to(device)), 0)
