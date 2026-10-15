@@ -137,3 +137,13 @@ tests/.test_data/*
 
 # docs/ copy of README
 docs/README.md
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+
+# MacOS
+.DS_Store
+._.DS_Store
+
+dev/
+dev/*

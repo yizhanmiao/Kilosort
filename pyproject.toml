@@ -1,0 +1,32 @@
+[project]
+name = "kilosort"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Yizhan Miao", email = "yizhanmiao@pm.me" }
+]
+requires-python = ">=3.12"
+dependencies = ["numpy>=2.5.4,<3", "torch>=2.10.0,<3", "scipy>=1.18.1,<2", "scikit-learn>=1.9.1,<2", "tqdm>=4.70.1,<5", "numba>=0.68.0,<0.69", "matplotlib>=3.11.2,<4"]
+
+[project.scripts]
+kilosort = "kilosort:main"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["osx-arm64"]
+
+[tool.pixi.pypi-dependencies]
+kilosort = { path = ".", editable = true }
+
+[tool.pixi.tasks]
+
+[tool.pixi.dependencies]
+python = "3.12.*"
+jupyterlab = ">=4.6.4,<5"
+faiss-cpu = ">=1.10.0,<2"
+probeinterface = ">=0.4.1,<0.5"
