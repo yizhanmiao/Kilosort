@@ -81,3 +81,54 @@ def test_cluster_with_prior_propagates_unrelated_value_error(monkeypatch):
     with pytest.raises(ValueError, match='something unrelated'):
         rk.cluster_spikes_with_prior(
             st, tF, _ops(3), prior, torch.device('cpu'), bfile=None)
+
+
+def test_cluster_with_prior_raises_if_nothing_left(monkeypatch):
+    # No spike matched a prior unit and the rest can't be clustered either:
+    # dropping them would hand an empty `st` to `save_sorting`.
+    prior = torch.ones((2, 4, 2))
+    st = _st([2, 2])
+    tF = torch.ones((2, 2, 2))
+
+    def failing_cluster_spikes(*a, **kw):
+        raise ValueError('Wall is empty after `clustering_qr.run`')
+    monkeypatch.setattr(rk, 'cluster_spikes', failing_cluster_spikes)
+
+    with pytest.raises(ValueError, match='Wall is empty'):
+        rk.cluster_spikes_with_prior(
+            st, tF, _ops(3), prior, torch.device('cpu'), bfile=None)
+
+
+def test_cluster_with_prior_returns_wall_on_cpu(monkeypatch):
+    prior = torch.ones((2, 4, 2))
+    clu, Wall, st_out, tF_out = rk.cluster_spikes_with_prior(
+        _st([0, 1]), torch.ones((2, 2, 2)), _ops(2), prior,
+        torch.device('cpu'), bfile=None)
+    assert Wall.device.type == 'cpu'
+
+
+def test_check_prior_dir_rejects_same_dir(tmp_path):
+    rk._check_prior_dir(None, tmp_path)
+    rk._check_prior_dir(tmp_path / 'other', tmp_path)
+    with pytest.raises(ValueError, match='overwrite'):
+        rk._check_prior_dir(tmp_path, tmp_path)
+    # Different spelling of the same folder
+    (tmp_path / 'sub').mkdir()
+    with pytest.raises(ValueError, match='overwrite'):
+        rk._check_prior_dir(tmp_path / 'sub' / '..', tmp_path)
+
+
+@pytest.mark.parametrize('shank_idx', [None, 0])
+def test_run_kilosort_rejects_previous_dir_equal_to_results_dir(
+        monkeypatch, tmp_path, shank_idx):
+    results = tmp_path if shank_idx is None else tmp_path / f'shank_{shank_idx}'
+    results.mkdir(exist_ok=True)
+    monkeypatch.setattr(
+        rk, 'set_files', lambda *a, **kw: (['f.bin'], tmp_path, results, {}))
+    monkeypatch.setattr(
+        rk, 'setup_logger', lambda *a, **kw: pytest.fail('log was touched'))
+    monkeypatch.setattr(
+        rk, '_sort', lambda *a, **kw: pytest.fail('sorting started'))
+    with pytest.raises(ValueError, match='overwrite'):
+        rk.run_kilosort({'n_chan_bin': 4}, shank_idx=shank_idx,
+                        previous_results_dir=tmp_path)

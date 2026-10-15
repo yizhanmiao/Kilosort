@@ -131,6 +131,17 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
         whitening matrix and PC basis are reused. With `shank_idx`, the
         folder for shank i is `previous_results_dir/shank_i`.
 
+        The earlier result must have been made with the same probe (channel
+        map and x/y geometry, so the same `bad_channels` and `shank_idx`) and
+        the same `fs`, `nt`, `nt0min`, `n_pcs`, `highpass_cutoff`, `do_CAR`
+        and `invert_sign`; otherwise a ValueError is raised. The templates
+        are re-estimated from the new session's spikes, but a prior unit with
+        no spikes in this session keeps its old template, so `templates.npy`
+        (and the `cluster_*.tsv` files) can contain units that have no spikes.
+        Units in the new data that do not match an earlier unit are numbered
+        after the earlier ones. `previous_results_dir` must differ from
+        `results_dir`, since the new run would overwrite the results it reads.
+
     Raises
     ------
     ValueError
@@ -190,6 +201,8 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
         _filename, _data_dir, _results_dir, _probe = \
             set_files(settings, filename, probe, probe_name, data_dir,
                       results_dir, bad_channels, idx)
+        _prior_dir = _prior_dir_for_shank(previous_results_dir, idx)
+        _check_prior_dir(_prior_dir, _results_dir)  # before the log is opened
         setup_logger(_results_dir, verbose_console=verbose_console)
 
         ops, st, clu, tF, Wall, similar_templates, \
@@ -197,7 +210,7 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
                 _filename, _results_dir, _probe, settings, data_dtype, device,
                 do_CAR, clear_cache, invert_sign, save_preprocessed_copy,
                 verbose_log, save_extra_vars, file_object, progress_bar,
-                previous_results_dir=_prior_dir_for_shank(previous_results_dir, idx),
+                previous_results_dir=_prior_dir,
             )
 
     return ops, st, clu, tF, Wall, similar_templates, \
@@ -1041,19 +1054,32 @@ def cluster_spikes_with_prior(st, tF, ops, prior_Wall, device, bfile,
                     'Wall is empty', '`get_data_cpu` never found suitable channels'
                     )):
                 raise
+            if not is_prior.any():
+                raise  # nothing left to sort
             logger.warning(f'Could not cluster {int(new.sum())} spikes that did '
                            f'not match previous units ({e}); dropping them.')
             keep = torch.from_numpy(is_prior)
             st, tF, clu = st[is_prior], tF[keep], clu[is_prior]
-            Wall_new = torch.zeros((0, *prior_Wall.shape[1:]))
         else:
             st[new] = st_new
             tF[new_t] = tF_new  # updates the caller's tF in place
             clu[new] = clu_new + N
 
-    Wall = torch.cat((Wall_prior.to(device), Wall_new.to(device)), 0)
+    # CPU, like `cluster_spikes` (`merging_function` returns `Ww.cpu()`)
+    Wall = torch.cat((Wall_prior.cpu(), Wall_new.cpu()), 0)
     isort = np.argsort(st[:, 0], kind='stable')
     return clu[isort], Wall, st[isort], tF[torch.from_numpy(isort)]
+
+
+def _check_prior_dir(prior_dir, results_dir):
+    """Refuse to write results over the previous results being read."""
+    if prior_dir is not None and \
+            Path(prior_dir).resolve() == Path(results_dir).resolve():
+        raise ValueError(
+            f"`previous_results_dir` and `results_dir` are the same folder "
+            f"('{results_dir}'); the new run would overwrite the results it "
+            "reuses. Set a different `results_dir`."
+            )
 
 
 def _prior_dir_for_shank(previous_results_dir, shank_idx):

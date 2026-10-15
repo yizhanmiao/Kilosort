@@ -10,6 +10,11 @@ in shape. We use the term 'template' anyway for this section because that is
 how they are treated in Phy. Elsewhere in the Kilosort4 code, we would refer
 to these as 'clusters.'
 
+When sorting with `previous_results_dir`, a unit from the earlier result that
+has no spikes in the new data keeps its ID and its old template, so some
+units in `templates.npy` and the `cluster_*.tsv` files can have no spikes in
+`spike_clusters.npy` (they are labeled 'mua').
+
 amplitudes.npy : shape (n_spikes,)
     Per-spike amplitudes, computed as the L2 norm of the PC features
     for each spike.
