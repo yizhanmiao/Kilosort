@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 import kilosort
-from kilosort import (preprocessing, datashift, template_matching, clustering_qr, 
+from kilosort import (preprocessing, datashift, template_matching, clustering_qr,
                       clustering_qr, io, spikedetect, CCG, PROBE_DIR)
 from kilosort.parameters import DEFAULT_SETTINGS
 from kilosort.utils import (
@@ -38,7 +38,7 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
                  save_preprocessed_copy=False, bad_channels=None, shank_idx=None,
                  verbose_console=False, verbose_log=False, torch_thread_lim=None):
     """Run full spike sorting pipeline on specified data.
-    
+
     Parameters
     ----------
     settings : dict
@@ -123,7 +123,7 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
     torch_thread_lim : int; optional.
         If set, this will limit the number of pytorch threads on CPU.
         See docs for `torch.set_num_threads`.
-    
+
     Raises
     ------
     ValueError
@@ -200,12 +200,12 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
           clear_cache, invert_sign, save_preprocessed_copy, verbose_log,
           save_extra_vars, file_object, progress_bar, gui_sorter=None):
     """Run sorting pipeline. See `run_kilosort` for documentation.
-    
+
     Notes
     -----
     filename is expected to be a list of Paths at this point, even if it's
     a singleton list.
-    
+
     """
 
     try:
@@ -226,9 +226,12 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
                             'Specify `device` to change this.')
                 device = torch.device('cpu')
 
-        if device != torch.device('cpu'):
+        if device == torch.device('cuda'):
             memory = torch.cuda.get_device_properties(device).total_memory/1024**3
             logger.info(f'Using CUDA device: {torch.cuda.get_device_name()} {memory:.2f}GB')
+        elif device == torch.device('mps'):
+            memory = torch.mps.recommended_max_memory()/1024**3
+            logger.info(f'Using MSP device: {memory:.2f}GB')
 
         logger.info('-'*40)
         if len(filename) == 1:
@@ -259,7 +262,7 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
             settings, probe, data_dtype, do_CAR, invert_sign,
             device, save_preprocessed_copy, gui_mode=(gui_sorter is not None)
             )
-        
+
         # Pretty-print ops and probe for log
         logger.debug(f"Initial ops:\n\n{ops_as_string(ops)}\n")
         logger.debug(f"Probe dictionary:\n\n{probe_as_string(ops['probe'])}\n")
@@ -272,7 +275,7 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
         ops = compute_preprocessing(ops, device, tic0=tic0, file_object=file_object)
         np.random.seed(1)
         torch.cuda.manual_seed_all(1)
-        torch.random.manual_seed(1) 
+        torch.random.manual_seed(1)
         ops, bfile, st0 = compute_drift_correction(
             ops, device, tic0=tic0, progress_bar=progress_bar,
             file_object=file_object, clear_cache=clear_cache,
@@ -343,7 +346,7 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
             kplots.plot_spike_positions(clu[kept_spikes], is_ref, results_dir)
         logger.info('Sorting finished.')
         log_sorting_summary(ops, log=logger, level='info')
-        
+
     except Exception as e:
         if isinstance(e, torch.cuda.OutOfMemoryError):
             logger.exception('Out of memory error, printing performance...')
@@ -355,7 +358,7 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
         # Annoyingly, this will print the error message twice for console, but
         # I haven't found a good way around that.
         raise
-    
+
     finally:
         close_logger()
 
@@ -368,8 +371,8 @@ def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
               bad_channels, shank_idx):
     """Parse file and directory information for data, probe, and results."""
 
-    # Check for filename 
-    filename = settings.get('filename', None) if filename is None else filename 
+    # Check for filename
+    filename = settings.get('filename', None) if filename is None else filename
 
     # Use data_dir if filename not available
     if filename is None:
@@ -391,7 +394,7 @@ def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
             if not f.exists():
                 raise FileExistsError(f"filename '{filename}' does not exist")
         data_dir = filename[0].parent
-        
+
     # Convert paths to strings when saving to ops, otherwise ops can only
     # be loaded on the operating system that originally ran the code.
     settings['filename'] = filename
@@ -406,7 +409,7 @@ def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
         results_dir = results_dir / f'shank_{shank_idx}'
     # Make sure results directory exists
     results_dir.mkdir(exist_ok=True, parents=True)
-    
+
     # find probe configuration file and load
     if probe is None:
         if probe_name is not None:     probe_path = PROBE_DIR / probe_name
@@ -415,7 +418,7 @@ def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
         else: raise ValueError('no probe_name or probe_path provided, set probe_name=')
         if not probe_path.exists():
             raise FileExistsError(f"probe_path '{probe_path}' does not exist")
-        
+
         probe  = io.load_probe(probe_path)
     else:
         # Make sure xc, yc are float32, otherwise there are casting problems
@@ -441,7 +444,7 @@ def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
 
 def setup_logger(results_dir, verbose_console=False):
     results_dir = Path(results_dir)
-    
+
     # Get root logger for Kilosort application
     ks_log = logging.getLogger('kilosort')
     ks_log.setLevel(logging.DEBUG)
@@ -496,7 +499,7 @@ def initialize_ops(settings, probe, data_dtype, do_CAR, invert_sign,
 
     if settings['nearest_chans'] > len(probe['chanMap']):
         msg = f"""
-            Parameter `nearest_chans` must be less than or equal to the number 
+            Parameter `nearest_chans` must be less than or equal to the number
             of data channels being sorted.\n
             Changing from {settings['nearest_chans']} to {len(probe['chanMap'])}.
             """
@@ -505,8 +508,8 @@ def initialize_ops(settings, probe, data_dtype, do_CAR, invert_sign,
 
     if 'duplicate_spike_bins' in settings:
         msg = """
-            The `duplicate_spike_bins` parameter has been replaced with 
-            `duplicate_spike_ms`. Specifying the former will have no effect, 
+            The `duplicate_spike_bins` parameter has been replaced with
+            `duplicate_spike_ms`. Specifying the former will have no effect,
             since it gets overwritten based on sampling rate.
             """
         warnings.warn(msg, DeprecationWarning)
@@ -597,7 +600,7 @@ def compute_preprocessing(ops, device, tic0=np.nan, file_object=None):
     Returns
     -------
     ops : dict
-    
+
     """
 
     tic = time.time()
@@ -610,7 +613,7 @@ def compute_preprocessing(ops, device, tic0=np.nan, file_object=None):
             get_run_parameters(ops)
     nskip = ops['settings']['nskip']
     whitening_range = ops['settings']['whitening_range']
-    
+
     # Compute high pass filter
     cutoff = ops['settings']['highpass_cutoff']
     hp_filter = preprocessing.get_highpass_filter(fs, cutoff, device=device)
@@ -689,7 +692,7 @@ def compute_drift_correction(ops, device, tic0=np.nan, progress_bar=None,
     st0 : np.ndarray.
         Intermediate spike times variable with 6 columns. This is only used
         for generating the 'Drift Scatter' plot through the GUI.
-    
+
     """
 
     tic = time.time()
@@ -703,7 +706,7 @@ def compute_drift_correction(ops, device, tic0=np.nan, progress_bar=None,
     hp_filter = ops['preprocessing']['hp_filter']
     whiten_mat = ops['preprocessing']['whiten_mat']
     bfile = io.BinaryFiltered(
-        ops['filename'], n_chan_bin, fs, NT, nt, twav_min, chan_map, 
+        ops['filename'], n_chan_bin, fs, NT, nt, twav_min, chan_map,
         hp_filter=hp_filter, whiten_mat=whiten_mat, device=device, do_CAR=do_CAR,
         invert_sign=invert, dtype=dtype, tmin=tmin, tmax=tmax,
         artifact_threshold=artifact, shift=shift, scale=scale,
@@ -712,7 +715,7 @@ def compute_drift_correction(ops, device, tic0=np.nan, progress_bar=None,
 
     ops, st = datashift.run(ops, bfile, device=device, progress_bar=progress_bar,
                             clear_cache=clear_cache, verbose=verbose)
-    
+
     elapsed = time.time() - tic
     total = time.time() - tic0
     ops['runtime_drift'] = elapsed
@@ -726,10 +729,10 @@ def compute_drift_correction(ops, device, tic0=np.nan, progress_bar=None,
         logger.debug(f'yblk shape: {ops["yblk"].shape}')
         logger.debug(f'dshift shape: {ops["dshift"].shape}')
         logger.debug(f'iKxx shape: {ops["iKxx"].shape}')
-    
+
     # binary file with drift correction
     bfile = io.BinaryFiltered(
-        ops['filename'], n_chan_bin, fs, NT, nt, twav_min, chan_map, 
+        ops['filename'], n_chan_bin, fs, NT, nt, twav_min, chan_map,
         hp_filter=hp_filter, whiten_mat=whiten_mat, device=device,
         dshift=ops['dshift'], do_CAR=do_CAR, dtype=dtype, tmin=tmin, tmax=tmax,
         artifact_threshold=artifact, shift=shift, scale=scale,
@@ -746,7 +749,7 @@ def compute_drift_correction(ops, device, tic0=np.nan, progress_bar=None,
 def detect_spikes(ops, device, bfile, tic0=np.nan, progress_bar=None,
                   clear_cache=False, verbose=False):
     """Detect spikes via template deconvolution.
-    
+
     Parameters
     ----------
     ops : dict
@@ -798,7 +801,7 @@ def detect_spikes(ops, device, bfile, tic0=np.nan, progress_bar=None,
     ops['usage_st0'] = get_performance()
     if torch.cuda.is_available():
         ops['cuda_st0'] = torch.cuda.memory_stats(device)
-    logger.info(f'{len(st0)} spikes extracted in {elapsed:.2f}s; ' + 
+    logger.info(f'{len(st0)} spikes extracted in {elapsed:.2f}s; ' +
                 f'total {total:.2f}s')
     logger.debug(f'st0 shape: {st0.shape}')
     logger.debug(f'tF shape: {tF.shape}')
@@ -832,7 +835,7 @@ def detect_spikes(ops, device, bfile, tic0=np.nan, progress_bar=None,
     logger.debug(f'Wall shape: {Wall.shape}')
     log_performance(logger, 'info', 'Resource usage after first clustering',
                     reset=True)
-   
+
     log_thread_count(logger)
 
     tic = time.time()
@@ -842,7 +845,7 @@ def detect_spikes(ops, device, bfile, tic0=np.nan, progress_bar=None,
     st, tF, ops = template_matching.extract(
         ops, bfile, Wall3, device=device, progress_bar=progress_bar
         )
-   
+
     log_thread_count(logger)
 
     elapsed = time.time() - tic
@@ -868,7 +871,7 @@ def detect_spikes(ops, device, bfile, tic0=np.nan, progress_bar=None,
 def cluster_spikes(st, tF, ops, device, bfile, tic0=np.nan, progress_bar=None,
                    clear_cache=False, verbose=False):
     """Cluster spikes using graph-based methods.
-    
+
     Parameters
     ----------
     st : np.ndarray
@@ -901,7 +904,7 @@ def cluster_spikes(st, tF, ops, device, bfile, tic0=np.nan, progress_bar=None,
     Wall : torch.Tensor
         PC feature representation of spike waveforms for each cluster, with shape
         (n_clusters, n_channels, n_pcs).
-    
+
     """
     tic = time.time()
     logger.info(' ')
@@ -911,14 +914,14 @@ def cluster_spikes(st, tF, ops, device, bfile, tic0=np.nan, progress_bar=None,
         ops, st, tF,  mode = 'template', device=device, progress_bar=progress_bar,
         clear_cache=clear_cache, verbose=verbose
         )
-    
+
     elapsed = time.time() - tic
     total = time.time() - tic0
     ops['runtime_clu'] = elapsed
     ops['usage_clu'] = get_performance()
     if torch.cuda.is_available():
         ops['cuda_clu'] = torch.cuda.memory_stats(device)
-    logger.info(f'{clu.max()+1} clusters found, in {elapsed:.2f}s; ' + 
+    logger.info(f'{clu.max()+1} clusters found, in {elapsed:.2f}s; ' +
                 f'total {total:.2f}s')
     logger.debug(f'clu shape: {clu.shape}')
     logger.debug(f'Wall shape: {Wall.shape}')
@@ -939,7 +942,7 @@ def cluster_spikes(st, tF, ops, device, bfile, tic0=np.nan, progress_bar=None,
     ops['usage_merge'] = get_performance()
     if torch.cuda.is_available():
         ops['cuda_merge'] = torch.cuda.memory_stats(device)
-    logger.info(f'{clu.max()+1} units found, in {elapsed:.2f}s; ' + 
+    logger.info(f'{clu.max()+1} units found, in {elapsed:.2f}s; ' +
                 f'total {total:.2f}s')
     logger.debug(f'clu shape: {clu.shape}')
     logger.debug(f'Wall shape: {Wall.shape}')
@@ -953,7 +956,7 @@ def cluster_spikes(st, tF, ops, device, bfile, tic0=np.nan, progress_bar=None,
 
 def save_sorting(ops, results_dir, st, clu, tF, Wall, imin, tic0=np.nan,
                  save_extra_vars=False, save_preprocessed_copy=False,
-                 skip_dat_path=False):  
+                 skip_dat_path=False):
     """Save sorting results, and format them for use with Phy
 
     Parameters
@@ -1030,7 +1033,7 @@ def save_sorting(ops, results_dir, st, clu, tF, Wall, imin, tic0=np.nan,
             skip_dat_path=skip_dat_path
             )
     logger.info(f'{int(is_ref.sum())} units found with good refractory periods')
-    
+
     ops['n_units_total'] = np.unique(clu).size
     ops['n_units_good'] = int(is_ref.sum())
     ops['n_spikes'] = st[kept_spikes].shape[0]
@@ -1052,7 +1055,7 @@ def save_sorting(ops, results_dir, st, clu, tF, Wall, imin, tic0=np.nan,
 
     logger.info(f'Total runtime: {runtime:.2f}s = {int(hrs):02d}:' +
                 f'{int(mins):02d}:{round(seconds)} h:m:s')
-    ops['runtime'] = runtime 
+    ops['runtime'] = runtime
     io.save_ops(ops, results_dir)
     logger.info(f'Sorting output saved in: {results_dir}.')
 
@@ -1065,7 +1068,7 @@ def save_sorting(ops, results_dir, st, clu, tF, Wall, imin, tic0=np.nan,
 
 def load_sorting(results_dir, device=None, load_extra_vars=False):
     '''Load saved sorting results into memory.
-    
+
     Parameters
     ----------
     results_dir : str or pathlib.Path
@@ -1125,7 +1128,7 @@ def load_sorting(results_dir, device=None, load_extra_vars=False):
         Per-spike amplitudes, computed as the L2 norm of the PC features
         for each spike.
         Includes spikes removed by `kilosort.postprocessing.remove_duplicate_spikes`.
-    
+
     '''
     if device is None:
         if torch.cuda.is_available():

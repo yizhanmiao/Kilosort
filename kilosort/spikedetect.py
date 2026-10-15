@@ -18,14 +18,14 @@ def my_max2d(X, dt):
     Xmax = max_pool2d(
         X.unsqueeze(0), [2*dt[0]+1, 2*dt[1]+1],
         stride=[1,1], padding=[dt[0],dt[1]]
-        )    
+        )
     return Xmax[0]
 
 def my_sum2d(X, dt):
     Xsum = avg_pool2d(
         X.unsqueeze(0), [2*dt[0]+1, 2*dt[1]+1],
         stride=[1,1], padding=[dt[0],dt[1]]
-        )    
+        )
     Xsum *= (2*dt[0]+1) * (2*dt[1]+1)
     return Xsum[0]
 
@@ -54,7 +54,7 @@ def extract_wPCA_wTEMP(ops, bfile, nt=61, twav_min=20, Th_single_ch=6, nskip=25,
     i = 0
     for j in range(0, bfile.n_batches, nskip):
         X = bfile.padded_batch_to_torch(j, ops)
-        
+
         clips_new = extract_snippets(X, nt=nt, twav_min=twav_min,
                                      Th_single_ch=Th_single_ch, device=device)
 
@@ -64,7 +64,7 @@ def extract_wPCA_wTEMP(ops, bfile, nt=61, twav_min=20, Th_single_ch=6, nskip=25,
             break
 
         clips[i:i+nnew] = clips_new.cpu().numpy()
-        i+= nnew 
+        i+= nnew
 
     clips = clips[:i]
     clips /= (clips**2).sum(1, keepdims=True)**.5
@@ -148,11 +148,11 @@ def template_match(X, ops, iC, iC2, weigh, device=torch.device('cuda')):
     tj = torch.arange(nb, device = device)
 
     for t in range(niter):
-        A = torch.einsum('ijk, jklm-> iklm', weigh, B[iC,:, nb*t:nb*(t+1)])        
+        A = torch.einsum('ijk, jklm-> iklm', weigh, B[iC,:, nb*t:nb*(t+1)])
         A = A.transpose(1,2)
         A = A.reshape(-1, Nfilt, A.shape[-1])
-        
-        #Aa, imax = torch.max(A, 0) 
+
+        #Aa, imax = torch.max(A, 0)
         Aa, imax = torch.max(A.abs(), 0)
         imax = (1+imax) * A[imax, ti.unsqueeze(-1), tj[:A.shape[-1]]].sign()
 
@@ -172,8 +172,8 @@ def template_match(X, ops, iC, iC2, weigh, device=torch.device('cuda')):
     imax = imax.abs()-1
     adist = B[iC[:, xy[:,0]], imax%nk, xy[:,1]] * ssign
 
-    #adist = B[iC[:, xy[:,0]], imax%nk, xy[:,1]] 
-    
+    #adist = B[iC[:, xy[:,0]], imax%nk, xy[:,1]]
+
     #xy[:,1] -= nt
     return xy, imax, amp, adist
 
@@ -187,7 +187,7 @@ def nearest_chans(ys, yc, xs, xc, nC, device=torch.device('cuda')):
     return iC, ds
 
 
-def yweighted(yc, iC, adist, xy, device=torch.device('cuda')):    
+def yweighted(yc, iC, adist, xy, device=torch.device('cuda')):
 
     yy = torch.from_numpy(yc).to(device)[iC]
     cF0 = torch.nn.functional.relu(adist)
@@ -197,7 +197,7 @@ def yweighted(yc, iC, adist, xy, device=torch.device('cuda')):
     return yct
 
 def run(ops, bfile, device=torch.device('cuda'), progress_bar=None,
-        clear_cache=False, verbose=False):        
+        clear_cache=False, verbose=False):
     sig = ops['settings']['min_template_size']
     nsizes = ops['settings']['template_sizes']
     nb = ops['Nbatches']
@@ -206,7 +206,7 @@ def run(ops, bfile, device=torch.device('cuda'), progress_bar=None,
         logger.info('Re-computing universal templates from data.')
         # Determine templates and PC features from data.
         ops['wPCA'], ops['wTEMP'] = extract_wPCA_wTEMP(
-            ops, bfile, nt=ops['nt'], twav_min=ops['nt0min'], 
+            ops, bfile, nt=ops['nt'], twav_min=ops['nt0min'],
             Th_single_ch=ops['settings']['Th_single_ch'], nskip=25,
             device=device
             )
@@ -236,7 +236,10 @@ def run(ops, bfile, device=torch.device('cuda'), progress_bar=None,
 
     iC2, _ = nearest_chans(ys, ys, xs, xs, nC2, device=device)
 
-    ds_torch = torch.from_numpy(ds).to(device).float()
+    if device == torch.device('mps'):
+        ds_torch = torch.from_numpy(ds.astype('f4')).to(device).float()
+    else:
+        ds_torch = torch.from_numpy(ds).to(device).float()
     template_sizes = sig * (1+torch.arange(nsizes, device=device))
     weigh = torch.exp(-ds_torch.unsqueeze(-1) / template_sizes**2)
     weigh = torch.permute(weigh, (2, 0, 1)).contiguous()
@@ -249,7 +252,7 @@ def run(ops, bfile, device=torch.device('cuda'), progress_bar=None,
     nt = ops['nt']
     tarange = torch.arange(-(nt//2),nt//2+1, device = device)
     logger.info('Detecting spikes...')
-    prog = tqdm(np.arange(bfile.n_batches), miniters=200 if progress_bar else None, 
+    prog = tqdm(np.arange(bfile.n_batches), miniters=200 if progress_bar else None,
                 mininterval=60 if progress_bar else None)
     # repeat performance log after every 10 minutes of data
     log_skip = int(600 / (ops['batch_size'] / ops['fs']))
@@ -296,7 +299,7 @@ def run(ops, bfile, device=torch.device('cuda'), progress_bar=None,
             # no need to raise an additional error for this.
             pass
         raise
-            
+
     log_performance(logger, 'debug', f'Batch {ibatch} of {nb-1} ({100*(ibatch/nb):.1f}%)')
 
     st = st[:k]
