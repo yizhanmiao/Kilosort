@@ -101,9 +101,11 @@ def similarity(Wall, W, nt=61):
     similar_templates = similar_templates.max(axis=-1)
     return similar_templates
 
-def refract(iclust2, st0, acg_threshold=0.2, ccg_threshold=0.25):
-    
+def refract(iclust2, st0, acg_threshold=0.2, ccg_threshold=0.25, n_units=None):
+    # `n_units`: total number of units, if some trailing units have no spikes.
     Nfilt = iclust2.max()+1
+    if n_units is not None:
+        Nfilt = max(Nfilt, n_units)
 
     is_refractory    = np.zeros(Nfilt, )
     cross_refractory = np.zeros(Nfilt, )

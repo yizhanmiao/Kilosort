@@ -1146,7 +1146,7 @@ def save_sorting(ops, results_dir, st, clu, tF, Wall, imin, tic0=np.nan,
             )
     logger.info(f'{int(is_ref.sum())} units found with good refractory periods')
 
-    ops['n_units_total'] = np.unique(clu).size
+    ops['n_units_total'] = Wall.shape[0]  # == number of unique ids unless some units are empty
     ops['n_units_good'] = int(is_ref.sum())
     ops['n_spikes'] = st[kept_spikes].shape[0]
     if ops.get('dshift', None) is not None:
@@ -1257,9 +1257,10 @@ def load_sorting(results_dir, device=None, load_extra_vars=False):
     kept_spikes = np.load(results_dir / 'kept_spikes.npy')
     acg_threshold = ops['settings']['acg_threshold']
     ccg_threshold = ops['settings']['ccg_threshold']
-    is_ref, est_contam_rate = CCG.refract(clu, st / ops['fs'],
-                                          acg_threshold=acg_threshold,
-                                          ccg_threshold=ccg_threshold)
+    is_ref, est_contam_rate = CCG.refract(
+        clu, st / ops['fs'], acg_threshold=acg_threshold,
+        ccg_threshold=ccg_threshold, n_units=similar_templates.shape[0]
+        )
 
     results = [ops, st, clu, similar_templates, is_ref,
                est_contam_rate, kept_spikes]

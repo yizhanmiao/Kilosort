@@ -62,7 +62,7 @@ def compute_spike_positions(st, tF, ops):
     return xs, ys
 
 
-def make_pc_features(ops, spike_templates, spike_clusters, tF):
+def make_pc_features(ops, spike_templates, spike_clusters, tF, n_units=None):
     '''Get PC Features and corresponding indices for export to Phy.
 
     NOTE: This function will update tF in-place!
@@ -82,6 +82,9 @@ def make_pc_features(ops, spike_templates, spike_clusters, tF):
     tF : torch.Tensor
         Tensor of pc features as returned by `template_matching.extract`,
         with shape `(n_spikes, nearest_chans, n_pcs)`.
+    n_units : int; optional.
+        Total number of units, if some trailing units have no spikes. By
+        default, inferred from the largest cluster id.
 
     Returns
     -------
@@ -98,7 +101,9 @@ def make_pc_features(ops, spike_templates, spike_clusters, tF):
     # xy: template centers, iC: channels associated with each template
     xy, iC = xy_templates(ops)
     n_templates = iC.shape[1]
-    n_clusters = np.unique(spike_clusters).size
+    # Cluster IDs can have gaps (units with no spikes), so size by max ID.
+    n_clusters = max(spike_clusters.max() + 1 if spike_clusters.size else 0,
+                     n_units or 0)
     n_chans = ops['nearest_chans']
     feature_ind = np.zeros((n_clusters, n_chans), dtype=np.uint32)
 

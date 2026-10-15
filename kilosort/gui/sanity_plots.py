@@ -159,7 +159,7 @@ def plot_spike_positions(plot_window, clu, is_refractory, settings):
 
     # 10 colors in palette, last one is gray for non-frefractory
     clu = clu.copy()
-    bad_units = np.unique(clu)[is_refractory == 0]
+    bad_units = np.flatnonzero(is_refractory == 0)
     bad_idx = np.isin(clu, bad_units)
     clu = np.mod(clu, 9)
     clu[bad_idx] = 9

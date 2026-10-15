@@ -393,7 +393,7 @@ def save_to_phy(st, clu, tF, Wall, probe, ops, imin, results_dir=None,
     # so the extra memory hopefully won't be an issue.
     tF = tF[kept_spikes]
     pc_features, pc_feature_ind = make_pc_features(
-        ops, spike_templates, spike_clusters, tF
+        ops, spike_templates, spike_clusters, tF, n_units=Wall.shape[0]
         )
     np.save(results_dir / 'pc_features.npy', pc_features)
     np.save(results_dir / 'pc_feature_ind.npy', pc_feature_ind)
@@ -405,7 +405,8 @@ def save_to_phy(st, clu, tF, Wall, probe, ops, imin, results_dir=None,
     ccg_threshold = ops['settings']['ccg_threshold']
     is_ref, est_contam_rate = CCG.refract(spike_clusters, spike_times / ops['fs'],
                                           acg_threshold=acg_threshold,
-                                          ccg_threshold=ccg_threshold)
+                                          ccg_threshold=ccg_threshold,
+                                          n_units=Wall.shape[0])
     log_performance(logger, level='debug', header='save_to_phy, est contam',
                     reset=True)
 
