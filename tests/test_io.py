@@ -354,6 +354,23 @@ def test_load_prior_templates_channel_mismatch():
             io.load_prior_templates(d, _current_ops(np.arange(4), fs=25000), torch.device('cpu'))
 
 
+def test_load_prior_templates_channel_mismatch_long_map():
+    rng = np.random.default_rng(3)
+    Wall = rng.standard_normal((2, 32, 6)).astype('float32')
+    wPCA = rng.standard_normal((6, 61)).astype('float32')
+    prior_map = np.arange(32)
+    cur_map = prior_map.copy()
+    cur_map[20] = 99  # differs only past the first 10 entries
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _write_prior(d, Wall, wPCA, prior_map)
+        with pytest.raises(ValueError, match='channel map') as excinfo:
+            io.load_prior_templates(d, _current_ops(cur_map), torch.device('cpu'))
+    msg = str(excinfo.value)
+    assert str(list(range(32))) in msg
+    assert str(cur_map.tolist()) in msg
+
+
 def test_load_prior_templates_missing_file():
     with tempfile.TemporaryDirectory() as d:
         with pytest.raises(FileNotFoundError, match='ops.npy'):
