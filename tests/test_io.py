@@ -345,8 +345,11 @@ def test_load_prior_templates_channel_mismatch():
     with tempfile.TemporaryDirectory() as d:
         d = Path(d)
         _write_prior(d, Wall, wPCA, np.arange(4))
-        with pytest.raises(ValueError, match='channel map'):
-            io.load_prior_templates(d, _current_ops(np.array([0, 1, 3])), torch.device('cpu'))
+        # Same length, different contents: message must show both maps
+        with pytest.raises(ValueError, match='channel map') as excinfo:
+            io.load_prior_templates(d, _current_ops(np.array([0, 1, 2, 4])), torch.device('cpu'))
+        msg = str(excinfo.value)
+        assert '[0, 1, 2, 3]' in msg and '[0, 1, 2, 4]' in msg
         with pytest.raises(ValueError, match='fs'):
             io.load_prior_templates(d, _current_ops(np.arange(4), fs=25000), torch.device('cpu'))
 

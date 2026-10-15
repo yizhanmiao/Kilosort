@@ -551,12 +551,14 @@ def load_prior_templates(results_dir, ops, device):
                 )
     prior_ops = load_ops(results_dir / 'ops.npy', device=device)
 
-    if not np.array_equal(np.asarray(prior_ops['probe']['chanMap']),
-                          np.asarray(ops['probe']['chanMap'])):
+    prior_map = np.asarray(prior_ops['probe']['chanMap']).tolist()
+    cur_map = np.asarray(ops['probe']['chanMap']).tolist()
+    if prior_map != cur_map:
+        def _short(m):  # ponytail: first 10 entries only, enough to spot a mismatch
+            return str(m) if len(m) <= 10 else f'{m[:10]}... ({len(m)} channels)'
         raise ValueError(
-            'Previous results use a different channel map '
-            f"({len(prior_ops['probe']['chanMap'])} channels) than this run "
-            f"({len(ops['probe']['chanMap'])} channels). Use the same probe, "
+            f'Previous results use a different channel map {_short(prior_map)} '
+            f'than this run {_short(cur_map)}. Use the same probe, '
             '`bad_channels` and `shank_idx` for both runs.'
             )
     for name, prev, cur in [
