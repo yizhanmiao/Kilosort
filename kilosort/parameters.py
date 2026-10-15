@@ -491,15 +491,6 @@ EXTRA_PARAMETERS = {
             after sorting is complete.
             """
     },
-
-    'device': {
-        'type': str,
-        'default': 'cpu',
-        'description':
-            """
-            Pytorch device.
-            """
-    }
 }
 
 # Add default values to descriptions
@@ -511,17 +502,11 @@ for k, v in MAIN_PARAMETERS.items():
         """
     v['description'] += s
 for k, v in EXTRA_PARAMETERS.items():
-    if v['type'].__name__ == 'str':
-        s = f"""
+    s = f"""
         Default value: {str(v["default"])}
+        Min, max: ({str(v['min'])}, {str(v['max'])})
         Type: {v['type'].__name__}
         """
-    else:
-        s = f"""
-            Default value: {str(v["default"])}
-            Min, max: ({str(v['min'])}, {str(v['max'])})
-            Type: {v['type'].__name__}
-            """
     v['description'] += s
 
 main_defaults = {k: v['default'] for k, v in MAIN_PARAMETERS.items()}

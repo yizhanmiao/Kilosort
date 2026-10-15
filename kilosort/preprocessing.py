@@ -132,11 +132,7 @@ def get_highpass_filter(fs=30000, cutoff=300, device=torch.device('cuda')):
     # symmetric filter from scipy
     hp_filter = filtfilt(b, a , x).copy()
 
-    # MPS only takes float32 at the moment
-    if device == torch.device('mps'):
-        hp_filter = torch.from_numpy(hp_filter.astype('f4')).to(device).float()
-    else:
-        hp_filter = torch.from_numpy(hp_filter).to(device).float()
+    hp_filter = torch.from_numpy(hp_filter).to(device).float()
     return hp_filter
 
 def fft_highpass(hp_filter, NT=30122):

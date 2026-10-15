@@ -145,6 +145,5 @@ docs/README.md
 .DS_Store
 ._.DS_Store
 
-dev/
 dev/*
 graphify-out/

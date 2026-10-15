@@ -240,10 +240,7 @@ def run(ops, bfile, device=torch.device('cuda'), progress_bar=None,
 
     iC2, _ = nearest_chans(ys, ys, xs, xs, nC2, device=device)
 
-    if device == torch.device('mps'):
-        ds_torch = torch.from_numpy(ds.astype('f4')).to(device).float()
-    else:
-        ds_torch = torch.from_numpy(ds).to(device).float()
+    ds_torch = torch.from_numpy(ds).to(device).float()
     template_sizes = sig * (1+torch.arange(nsizes, device=device))
     weigh = torch.exp(-ds_torch.unsqueeze(-1) / template_sizes**2)
     weigh = torch.permute(weigh, (2, 0, 1)).contiguous()
