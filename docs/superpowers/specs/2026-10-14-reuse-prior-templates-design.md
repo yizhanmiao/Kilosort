@@ -37,13 +37,14 @@ correction (`nblocks`) runs as configured.
   `Wall_prior` (units × channels × PCs), `wPCA`, `wTEMP`, `whiten_mat`, and the prior `ops`.
   - `ops.npy` is read with the existing `io.load_ops`. It supplies `wPCA`, `wTEMP`,
     `preprocessing['whiten_mat']`, the channel map, `fs`, `nt` and `n_pcs`.
-  - If `Wall.npy` exists (saved with `save_extra_vars=True`), it is used as `Wall_prior`.
-  - Otherwise `Wall_prior` is rebuilt by projecting `templates.npy` onto `wPCA`. The
-    `wPCA` rows are orthonormal, so this exactly inverts how `save_to_phy` builds
-    `templates.npy`.
+  - `Wall_prior` is always rebuilt by projecting `templates.npy` onto `wPCA` (a
+    pseudo-inverse). `Wall.npy` is deliberately ignored: `save_to_phy` never deletes an
+    old one, so one left over in the folder from an earlier run can be stale.
+    The round trip is exact (tested), so nothing is lost.
 - Validation runs after `bad_channels` and `shank_idx` are applied. If the channel map,
-  `fs`, `nt` or `n_pcs` differs from the current run, it raises `ValueError` naming the
-  setting and showing both values.
+  probe geometry (`xc`, `yc`), `fs`, `nt`, `n_pcs`, `invert_sign`, `do_CAR`,
+  `highpass_cutoff` or `nt0min` differs from the current run, it raises `ValueError`
+  naming the setting and showing both values.
 - Shared basis and whitening:
   - `compute_preprocessing` still computes the high-pass filter etc., but its whitening
     matrix is replaced with the prior one.

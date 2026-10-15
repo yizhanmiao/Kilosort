@@ -543,6 +543,13 @@ def load_prior_templates(results_dir, ops, device):
     -------
     dict with 'Wall' (n_units, n_chans, n_pcs), 'wPCA', 'wTEMP', 'whiten_mat'.
 
+    Notes
+    -----
+    `Wall` is always rebuilt from `templates.npy`, never read from `Wall.npy`,
+    since an old `Wall.npy` can be left over from an earlier run.
+    Raises ValueError if the channel map, probe geometry, `fs`, `nt`, `n_pcs`,
+    `invert_sign`, `do_CAR`, `highpass_cutoff` or `nt0min` differ.
+
     """
     results_dir = Path(results_dir)
     for name in ['ops.npy', 'templates.npy']:
@@ -560,26 +567,49 @@ def load_prior_templates(results_dir, ops, device):
             f'than this run {cur_map}. Use the same probe, '
             '`bad_channels` and `shank_idx` for both runs.'
             )
-    for name, prev, cur in [
-            ('fs', prior_ops['fs'], ops['fs']),
-            ('nt', prior_ops['nt'], ops['nt']),
-            ('n_pcs', prior_ops['settings']['n_pcs'], ops['settings']['n_pcs'])]:
+    checks = [
+        ('fs', prior_ops['fs'], ops['fs']),
+        ('nt', prior_ops['nt'], ops['nt']),
+        ('n_pcs', prior_ops['settings']['n_pcs'], ops['settings']['n_pcs']),
+        # These change the waveforms the templates were built from. Compared
+        # only if present in both (older results may lack some).
+        ('invert_sign', prior_ops.get('invert_sign'), ops.get('invert_sign')),
+        ('do_CAR', prior_ops.get('do_CAR'), ops.get('do_CAR')),
+        ('highpass_cutoff', prior_ops['settings'].get('highpass_cutoff'),
+         ops['settings'].get('highpass_cutoff')),
+        ('nt0min', prior_ops['settings'].get('nt0min'),
+         ops['settings'].get('nt0min')),
+        ]
+    for name, prev, cur in checks:
+        if prev is None or cur is None:
+            continue
         if prev != cur:
             raise ValueError(
                 f'Previous results have {name}={prev}, but this run has {name}={cur}.'
+                )
+    for name in ['xc', 'yc']:
+        prev = prior_ops['probe'].get(name)
+        cur = ops['probe'].get(name)
+        if prev is None or cur is None:
+            continue
+        prev, cur = np.asarray(prev), np.asarray(cur)
+        if prev.shape != cur.shape or not np.allclose(prev, cur):
+            raise ValueError(
+                f'Previous results have probe {name}={prev.tolist()}, but this '
+                f'run has probe {name}={cur.tolist()}. Use the same probe '
+                'geometry for both runs.'
                 )
 
     wPCA = torch.as_tensor(prior_ops['wPCA']).float().to(device)
     wTEMP = torch.as_tensor(prior_ops['wTEMP']).float().to(device)
     whiten_mat = prior_ops['preprocessing']['whiten_mat'].float().to(device)
 
-    if (results_dir / 'Wall.npy').exists():
-        Wall = torch.from_numpy(np.load(results_dir / 'Wall.npy')).float()
-    else:
-        # Invert save_to_phy: templates[k,t,c] = sum_p Wall[k,c,p] * wPCA[p,t]
-        templates = torch.from_numpy(np.load(results_dir / 'templates.npy')).float()
-        Wall = torch.einsum('ktc, tp -> kcp', templates,
-                            torch.linalg.pinv(wPCA.cpu()))
+    # Always rebuild from templates.npy: a Wall.npy left over from an earlier
+    # `save_extra_vars=True` run in the same folder can be stale.
+    # Invert save_to_phy: templates[k,t,c] = sum_p Wall[k,c,p] * wPCA[p,t]
+    templates = torch.from_numpy(np.load(results_dir / 'templates.npy')).float()
+    Wall = torch.einsum('ktc, tp -> kcp', templates,
+                        torch.linalg.pinv(wPCA.cpu()))
 
     return {'Wall': Wall.to(device), 'wPCA': wPCA, 'wTEMP': wTEMP,
             'whiten_mat': whiten_mat}

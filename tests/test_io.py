@@ -292,7 +292,8 @@ def test_downsampling(bfile):
     assert nbb <= 3*nba
 
 
-def _write_prior(results_dir, Wall, wPCA, chan_map, fs=30000, nt=61, n_pcs=6):
+def _write_prior(results_dir, Wall, wPCA, chan_map, fs=30000, nt=61, n_pcs=6,
+                 extra=None):
     """Write a minimal ops.npy + templates.npy pair like save_to_phy/save_ops do."""
     prior_ops = {
         'fs': fs, 'nt': nt, 'settings': {'n_pcs': n_pcs},
@@ -300,15 +301,28 @@ def _write_prior(results_dir, Wall, wPCA, chan_map, fs=30000, nt=61, n_pcs=6):
         'wPCA': wPCA, 'wTEMP': wPCA.copy(), 'is_tensor': ['wPCA', 'wTEMP'],
         'preprocessing': {'whiten_mat': np.eye(len(chan_map), dtype='float32')},
     }
+    for k, v in (extra or {}).items():
+        _set_nested(prior_ops, k, v)
     np.save(results_dir / 'ops.npy', np.array(prior_ops))
     # Same formula as io.save_to_phy: (N, chan, pc) x (pc, t) -> (N, t, chan)
     templates = (Wall[..., np.newaxis] * wPCA).sum(axis=-2).transpose(0, 2, 1)
     np.save(results_dir / 'templates.npy', templates)
 
 
-def _current_ops(chan_map, fs=30000, nt=61, n_pcs=6):
-    return {'fs': fs, 'nt': nt, 'settings': {'n_pcs': n_pcs},
-            'probe': {'chanMap': chan_map}}
+def _set_nested(d, key, value):
+    # 'settings.nt0min' -> d['settings']['nt0min']
+    *parents, last = key.split('.')
+    for p in parents:
+        d = d.setdefault(p, {})
+    d[last] = value
+
+
+def _current_ops(chan_map, fs=30000, nt=61, n_pcs=6, extra=None):
+    ops = {'fs': fs, 'nt': nt, 'settings': {'n_pcs': n_pcs},
+           'probe': {'chanMap': chan_map}}
+    for k, v in (extra or {}).items():
+        _set_nested(ops, k, v)
+    return ops
 
 
 def test_load_prior_templates_round_trip():
@@ -326,7 +340,8 @@ def test_load_prior_templates_round_trip():
     assert prior['wPCA'].shape == (6, 61)
 
 
-def test_load_prior_templates_prefers_wall_npy():
+def test_load_prior_templates_ignores_stale_wall_npy():
+    # save_to_phy never deletes an old Wall.npy, so templates.npy is the truth.
     rng = np.random.default_rng(1)
     Wall = rng.standard_normal((2, 4, 6)).astype('float32')
     wPCA = rng.standard_normal((6, 61)).astype('float32')
@@ -335,7 +350,38 @@ def test_load_prior_templates_prefers_wall_npy():
         _write_prior(d, Wall, wPCA, np.arange(4))
         np.save(d / 'Wall.npy', Wall * 2)
         prior = io.load_prior_templates(d, _current_ops(np.arange(4)), torch.device('cpu'))
-    assert torch.allclose(prior['Wall'], torch.from_numpy(Wall * 2))
+    assert torch.allclose(prior['Wall'], torch.from_numpy(Wall), atol=1e-3)
+
+
+_SAME = {'invert_sign': False, 'do_CAR': True, 'settings.highpass_cutoff': 300.,
+         'settings.nt0min': 20,
+         'probe.xc': np.array([0., 0, 20, 20]), 'probe.yc': np.arange(4) * 20.}
+
+
+@pytest.mark.parametrize('name, kwargs, extra', [
+    ('nt', {'nt': 41}, {}),
+    ('n_pcs', {'n_pcs': 4}, {}),
+    ('invert_sign', {}, {'invert_sign': True}),
+    ('do_CAR', {}, {'do_CAR': False}),
+    ('highpass_cutoff', {}, {'settings.highpass_cutoff': 500.}),
+    ('nt0min', {}, {'settings.nt0min': 25}),
+    ('xc', {}, {'probe.xc': np.array([0., 0, 20, 40])}),
+    ('yc', {}, {'probe.yc': np.arange(4) * 25.}),
+    ])
+def test_load_prior_templates_setting_mismatch(name, kwargs, extra):
+    rng = np.random.default_rng(4)
+    Wall = rng.standard_normal((2, 4, 6)).astype('float32')
+    wPCA = rng.standard_normal((6, 61)).astype('float32')
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _write_prior(d, Wall, wPCA, np.arange(4), extra=_SAME)
+        # Identical settings load fine
+        io.load_prior_templates(
+            d, _current_ops(np.arange(4), extra=_SAME), torch.device('cpu'))
+        with pytest.raises(ValueError, match=name):
+            io.load_prior_templates(
+                d, _current_ops(np.arange(4), extra={**_SAME, **extra}, **kwargs),
+                torch.device('cpu'))
 
 
 def test_load_prior_templates_channel_mismatch():
@@ -369,6 +415,18 @@ def test_load_prior_templates_channel_mismatch_long_map():
     msg = str(excinfo.value)
     assert str(list(range(32))) in msg
     assert str(cur_map.tolist()) in msg
+
+
+def test_load_prior_templates_missing_templates_npy():
+    rng = np.random.default_rng(5)
+    Wall = rng.standard_normal((2, 4, 6)).astype('float32')
+    wPCA = rng.standard_normal((6, 61)).astype('float32')
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _write_prior(d, Wall, wPCA, np.arange(4))
+        (d / 'templates.npy').unlink()
+        with pytest.raises(FileNotFoundError, match='templates.npy'):
+            io.load_prior_templates(d, _current_ops(np.arange(4)), torch.device('cpu'))
 
 
 def test_load_prior_templates_missing_file():
