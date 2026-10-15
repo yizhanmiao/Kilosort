@@ -152,6 +152,32 @@ def postprocess_templates(Wall, ops, clu, st, tF, device=torch.device('cuda')):
     return Wall3
 
 
+def drop_prior_duplicates(prior_Wall, cand_Wall, ops, r_thresh=0.9):
+    """Remove candidate templates that duplicate a template from a previous sort."""
+    N = prior_Wall.shape[0]
+    if N == 0 or cand_Wall.shape[0] == 0:
+        return cand_Wall
+    both = torch.cat((prior_Wall.to(cand_Wall.device), cand_Wall), 0)
+    sim = CCG.similarity(both, ops['wPCA'].contiguous(), nt=ops['nt'])
+    keep = sim[N:, :N].max(1) <= r_thresh
+    return cand_Wall[torch.from_numpy(keep).to(cand_Wall.device)]
+
+
+def reestimate_prior_templates(prior_Wall, clu, tF, iCC, iU):
+    """Average this session's features for each prior unit.
+
+    Units with no spikes keep their old template so row k still means unit k.
+    """
+    W = prior_Wall.clone().cpu()
+    iCC, iU = iCC.cpu(), iU.cpu()
+    for k in range(W.shape[0]):
+        ix = torch.from_numpy(clu == k)
+        if ix.any():
+            W[k] = 0
+            W[k, iCC[:, iU[k]], :] = tF[ix].mean(0)
+    return W
+
+
 def prepare_matching(ops, U):
     nt = ops['nt']
     W = ops['wPCA'].contiguous()
