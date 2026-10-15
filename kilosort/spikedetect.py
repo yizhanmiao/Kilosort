@@ -202,7 +202,11 @@ def run(ops, bfile, device=torch.device('cuda'), progress_bar=None,
     nsizes = ops['settings']['template_sizes']
     nb = ops['Nbatches']
 
-    if ops['settings']['templates_from_data']:
+    if ops.get('prior_basis', False):
+        # wPCA/wTEMP were loaded from a previous result; prior templates
+        # are expressed in this basis, so it must not be re-learned.
+        logger.info('Using universal templates from previous results.')
+    elif ops['settings']['templates_from_data']:
         logger.info('Re-computing universal templates from data.')
         # Determine templates and PC features from data.
         ops['wPCA'], ops['wTEMP'] = extract_wPCA_wTEMP(
