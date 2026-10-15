@@ -527,6 +527,63 @@ def load_ops(ops_path, device=None):
     return ops
 
 
+def load_prior_templates(results_dir, ops, device):
+    """Load templates and the basis they live in from a previous sorting result.
+
+    Parameters
+    ----------
+    results_dir : str or pathlib.Path
+        Results folder of a previous `run_kilosort` call.
+    ops : dict
+        Current run's ops, used to check that both runs are compatible.
+    device : torch.device
+
+    Returns
+    -------
+    dict with 'Wall' (n_units, n_chans, n_pcs), 'wPCA', 'wTEMP', 'whiten_mat'.
+
+    """
+    results_dir = Path(results_dir)
+    for name in ['ops.npy', 'templates.npy']:
+        if not (results_dir / name).exists():
+            raise FileNotFoundError(
+                f"'{name}' not found in previous_results_dir '{results_dir}'."
+                )
+    prior_ops = load_ops(results_dir / 'ops.npy', device=device)
+
+    if not np.array_equal(np.asarray(prior_ops['probe']['chanMap']),
+                          np.asarray(ops['probe']['chanMap'])):
+        raise ValueError(
+            'Previous results use a different channel map '
+            f"({len(prior_ops['probe']['chanMap'])} channels) than this run "
+            f"({len(ops['probe']['chanMap'])} channels). Use the same probe, "
+            '`bad_channels` and `shank_idx` for both runs.'
+            )
+    for name, prev, cur in [
+            ('fs', prior_ops['fs'], ops['fs']),
+            ('nt', prior_ops['nt'], ops['nt']),
+            ('n_pcs', prior_ops['settings']['n_pcs'], ops['settings']['n_pcs'])]:
+        if prev != cur:
+            raise ValueError(
+                f'Previous results have {name}={prev}, but this run has {name}={cur}.'
+                )
+
+    wPCA = torch.as_tensor(prior_ops['wPCA']).float().to(device)
+    wTEMP = torch.as_tensor(prior_ops['wTEMP']).float().to(device)
+    whiten_mat = prior_ops['preprocessing']['whiten_mat'].float().to(device)
+
+    if (results_dir / 'Wall.npy').exists():
+        Wall = torch.from_numpy(np.load(results_dir / 'Wall.npy')).float()
+    else:
+        # Invert save_to_phy: templates[k,t,c] = sum_p Wall[k,c,p] * wPCA[p,t]
+        templates = torch.from_numpy(np.load(results_dir / 'templates.npy')).float()
+        Wall = torch.einsum('ktc, tp -> kcp', templates,
+                            torch.linalg.pinv(wPCA.cpu()))
+
+    return {'Wall': Wall.to(device), 'wPCA': wPCA, 'wTEMP': wTEMP,
+            'whiten_mat': whiten_mat}
+
+
 def bfile_from_ops(ops=None, ops_path=None, filename=None, device=None):
     if device is None:
         if torch.cuda.is_available():

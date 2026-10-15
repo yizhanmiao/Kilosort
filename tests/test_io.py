@@ -290,3 +290,68 @@ def test_downsampling(bfile):
     # But batch(i) should be the same as batch(j*3)
     assert torch.allclose(b15a, b5b)
     assert nbb <= 3*nba
+
+
+def _write_prior(results_dir, Wall, wPCA, chan_map, fs=30000, nt=61, n_pcs=6):
+    """Write a minimal ops.npy + templates.npy pair like save_to_phy/save_ops do."""
+    prior_ops = {
+        'fs': fs, 'nt': nt, 'settings': {'n_pcs': n_pcs},
+        'probe': {'chanMap': chan_map},
+        'wPCA': wPCA, 'wTEMP': wPCA.copy(), 'is_tensor': ['wPCA', 'wTEMP'],
+        'preprocessing': {'whiten_mat': np.eye(len(chan_map), dtype='float32')},
+    }
+    np.save(results_dir / 'ops.npy', np.array(prior_ops))
+    # Same formula as io.save_to_phy: (N, chan, pc) x (pc, t) -> (N, t, chan)
+    templates = (Wall[..., np.newaxis] * wPCA).sum(axis=-2).transpose(0, 2, 1)
+    np.save(results_dir / 'templates.npy', templates)
+
+
+def _current_ops(chan_map, fs=30000, nt=61, n_pcs=6):
+    return {'fs': fs, 'nt': nt, 'settings': {'n_pcs': n_pcs},
+            'probe': {'chanMap': chan_map}}
+
+
+def test_load_prior_templates_round_trip():
+    rng = np.random.default_rng(0)
+    Wall = rng.standard_normal((3, 4, 6)).astype('float32')
+    wPCA = rng.standard_normal((6, 61)).astype('float32')  # not orthonormal
+    chan_map = np.arange(4)
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _write_prior(d, Wall, wPCA, chan_map)
+        prior = io.load_prior_templates(d, _current_ops(chan_map), torch.device('cpu'))
+    assert prior['Wall'].shape == (3, 4, 6)
+    assert torch.allclose(prior['Wall'], torch.from_numpy(Wall), atol=1e-3)
+    assert prior['whiten_mat'].shape == (4, 4)
+    assert prior['wPCA'].shape == (6, 61)
+
+
+def test_load_prior_templates_prefers_wall_npy():
+    rng = np.random.default_rng(1)
+    Wall = rng.standard_normal((2, 4, 6)).astype('float32')
+    wPCA = rng.standard_normal((6, 61)).astype('float32')
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _write_prior(d, Wall, wPCA, np.arange(4))
+        np.save(d / 'Wall.npy', Wall * 2)
+        prior = io.load_prior_templates(d, _current_ops(np.arange(4)), torch.device('cpu'))
+    assert torch.allclose(prior['Wall'], torch.from_numpy(Wall * 2))
+
+
+def test_load_prior_templates_channel_mismatch():
+    rng = np.random.default_rng(2)
+    Wall = rng.standard_normal((2, 4, 6)).astype('float32')
+    wPCA = rng.standard_normal((6, 61)).astype('float32')
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+        _write_prior(d, Wall, wPCA, np.arange(4))
+        with pytest.raises(ValueError, match='channel map'):
+            io.load_prior_templates(d, _current_ops(np.array([0, 1, 3])), torch.device('cpu'))
+        with pytest.raises(ValueError, match='fs'):
+            io.load_prior_templates(d, _current_ops(np.arange(4), fs=25000), torch.device('cpu'))
+
+
+def test_load_prior_templates_missing_file():
+    with tempfile.TemporaryDirectory() as d:
+        with pytest.raises(FileNotFoundError, match='ops.npy'):
+            io.load_prior_templates(Path(d), _current_ops(np.arange(4)), torch.device('cpu'))
