@@ -18,7 +18,7 @@ import numpy as np
 
 MAIN_PARAMETERS = {
     # NOTE: n_chan_bin must be specified by user when running through API
-    'n_chan_bin': {  
+    'n_chan_bin': {
         'gui_name': 'number of channels', 'type': int, 'min': 0, 'max': np.inf,
         'exclude': [0], 'default': None, 'step': 'data',
         'description':
@@ -121,7 +121,7 @@ EXTRA_PARAMETERS = {
             cases this should be left as None, but may be necessary for float32
             data for example. If needed, `shift` and `scale` should be set such
             that data is roughly in the range -100 to +100.
-            
+
             If set, data will be `data = data*scale + shift`.
             """
     },
@@ -135,7 +135,7 @@ EXTRA_PARAMETERS = {
             cases this should be left as None, but may be necessary for float32
             data for example. If needed, `shift` and `scale` should be set such
             that data is roughly in the range -100 to +100.
-            
+
             If set, data will be `data = data*scale + shift`.
             """
     },
@@ -228,10 +228,10 @@ EXTRA_PARAMETERS = {
     'nt0min': {
         'gui_name': 'nt0min', 'type': int, 'min': 0, 'max': np.inf,
         'exclude': [], 'default': None, 'step': 'spike detection',
-        'description': 
+        'description':
             """
-            Sample index for aligning waveforms, so that their minimum 
-            or maximum value happens here. Defaults to 
+            Sample index for aligning waveforms, so that their minimum
+            or maximum value happens here. Defaults to
             `int(20 * settings['nt']/61)`.
             """
     },
@@ -253,7 +253,7 @@ EXTRA_PARAMETERS = {
             """
             Horizontal spacing of template centers used for spike detection,
             in microns. The default 32um should work well for Neuropixels 1 and
-            Neuropixels 2 probes. For other probe geometries, try setting this 
+            Neuropixels 2 probes. For other probe geometries, try setting this
             to the median lateral distance between contacts to start.
             """
     },
@@ -324,7 +324,7 @@ EXTRA_PARAMETERS = {
         'exclude': [], 'default': True, 'step': 'spike detection',
         'description':
             """
-            Indicates whether spike shapes used in universal templates should be 
+            Indicates whether spike shapes used in universal templates should be
             estimated from the data or loaded from the predefined templates.
             """
     },
@@ -355,7 +355,7 @@ EXTRA_PARAMETERS = {
         'description':
             """
             For single channel threshold crossings to compute universal-
-            templates. In units of whitened data standard deviations. 
+            templates. In units of whitened data standard deviations.
             """
     },
 
@@ -366,8 +366,8 @@ EXTRA_PARAMETERS = {
         'exclude': [0], 'default': 0.2, 'step': 'clustering',
         'description':
             """
-            Fraction of refractory period violations that are allowed in the ACG 
-            compared to baseline; used to assign "good" units. 
+            Fraction of refractory period violations that are allowed in the ACG
+            compared to baseline; used to assign "good" units.
             """
     },
 
@@ -390,7 +390,7 @@ EXTRA_PARAMETERS = {
             `clustering_qr.neigh_mat` when building the adjacency matrix that
             defines the graph for clustering. Note that changes to this parameter
             will affect resource usage and sorting time.
-            """ 
+            """
     },
 
     'cluster_downsampling': {
@@ -428,7 +428,7 @@ EXTRA_PARAMETERS = {
 
             Use `max_cluster_subset = None` if you do not want a limit on
             the subset size.
-            
+
             The old default behavior (version < 4.1.0) is
             equivalent to `max_cluster_subset=None, cluster_downsampling=20`.
             Versions 4.1.0 through 4.1.2 defaulted to
@@ -496,15 +496,15 @@ EXTRA_PARAMETERS = {
 # Add default values to descriptions
 for k, v in MAIN_PARAMETERS.items():
     s = f"""
-        Default value: {str(v["default"])}   
-        Min, max: ({str(v['min'])}, {str(v['max'])})   
+        Default value: {str(v["default"])}
+        Min, max: ({str(v['min'])}, {str(v['max'])})
         Type: {v['type'].__name__}
         """
     v['description'] += s
 for k, v in EXTRA_PARAMETERS.items():
     s = f"""
-        Default value: {str(v["default"])}   
-        Min, max: ({str(v['min'])}, {str(v['max'])})   
+        Default value: {str(v["default"])}
+        Min, max: ({str(v['min'])}, {str(v['max'])})
         Type: {v['type'].__name__}
         """
     v['description'] += s
@@ -517,12 +517,12 @@ DEFAULT_SETTINGS = {**main_defaults, **extra_defaults}
 
 def compare_settings(settings):
     """Find settings values that differ from the defaults.
-    
+
     Parameters
     ----------
     settings : dict
         Formatted the same as `DEFAULT_SETTINGS`.
-    
+
     Returns
     -------
     modified_settings : dict

@@ -1,0 +1,47 @@
+[project]
+name = "kilosort"
+version = "0.1.0"
+description = "Spike sorting pipeline"
+readme = "README.md"
+license = "GPL-3.0-only"
+authors = [
+    { name = "Yizhan Miao", email = "yizhanmiao@pm.me" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.20",
+    "scipy",
+    "scikit-learn",
+    "tqdm",
+    "torch>=2.1",
+    "numba",
+    "faiss-cpu",
+    "psutil",
+    "matplotlib",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+# faiss-cpu wheels on PyPI need macOS >= 14
+platforms = [{ name = "osx-arm64-macos14", platform = "osx-arm64", macos = "14.0" }]
+
+[tool.pixi.pypi-dependencies]
+kilosort = { path = ".", editable = true }
+holoviews = { version = ">=1.23.2,<2", extras = ["recommended"] }
+hvplot = ">=0.12.2,<0.13"
+datashader = ">=0.19.1,<0.20"
+ibis-framework = { version = ">=12.0.0,<13", extras = ["duckdb"] }
+
+[tool.pixi.dependencies]
+python = "3.12.*"
+jupyterlab = ">=4.6.4,<5"
+probeinterface = ">=0.4.1,<0.5"
+jupyter_bokeh = ">=4.1.0,<5"
+pyviz_comms = ">=3.0.6,<4"

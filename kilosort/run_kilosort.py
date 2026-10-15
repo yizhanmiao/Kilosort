@@ -9,7 +9,7 @@ import numpy as np
 import torch
 
 import kilosort
-from kilosort import (preprocessing, datashift, template_matching, clustering_qr, 
+from kilosort import (preprocessing, datashift, template_matching, clustering_qr,
                       clustering_qr, io, spikedetect, CCG, PROBE_DIR)
 from kilosort.parameters import DEFAULT_SETTINGS
 from kilosort.utils import (
@@ -36,9 +36,10 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
                  data_dtype=None, do_CAR=True, invert_sign=False, device=None,
                  progress_bar=None, save_extra_vars=False, clear_cache=False,
                  save_preprocessed_copy=False, bad_channels=None, shank_idx=None,
-                 verbose_console=False, verbose_log=False, torch_thread_lim=None):
+                 verbose_console=False, verbose_log=False, torch_thread_lim=None,
+                 previous_results_dir=None):
     """Run full spike sorting pipeline on specified data.
-    
+
     Parameters
     ----------
     settings : dict
@@ -123,7 +124,24 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
     torch_thread_lim : int; optional.
         If set, this will limit the number of pytorch threads on CPU.
         See docs for `torch.set_num_threads`.
-    
+    previous_results_dir : str or pathlib.Path; optional.
+        Results folder of an earlier `run_kilosort` call on the same probe.
+        Its templates are reused so that unit k here is unit k there; units
+        not in the earlier result are numbered after them. The earlier
+        whitening matrix and PC basis are reused. With `shank_idx`, the
+        folder for shank i is `previous_results_dir/shank_i`.
+
+        The earlier result must have been made with the same probe (channel
+        map and x/y geometry, so the same `bad_channels` and `shank_idx`) and
+        the same `fs`, `nt`, `nt0min`, `n_pcs`, `highpass_cutoff`, `do_CAR`
+        and `invert_sign`; otherwise a ValueError is raised. The templates
+        are re-estimated from the new session's spikes, but a prior unit with
+        no spikes in this session keeps its old template, so `templates.npy`
+        (and the `cluster_*.tsv` files) can contain units that have no spikes.
+        Units in the new data that do not match an earlier unit are numbered
+        after the earlier ones. `previous_results_dir` must differ from
+        `results_dir`, since the new run would overwrite the results it reads.
+
     Raises
     ------
     ValueError
@@ -183,6 +201,8 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
         _filename, _data_dir, _results_dir, _probe = \
             set_files(settings, filename, probe, probe_name, data_dir,
                       results_dir, bad_channels, idx)
+        _prior_dir = _prior_dir_for_shank(previous_results_dir, idx)
+        _check_prior_dir(_prior_dir, _results_dir)  # before the log is opened
         setup_logger(_results_dir, verbose_console=verbose_console)
 
         ops, st, clu, tF, Wall, similar_templates, \
@@ -190,6 +210,7 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
                 _filename, _results_dir, _probe, settings, data_dtype, device,
                 do_CAR, clear_cache, invert_sign, save_preprocessed_copy,
                 verbose_log, save_extra_vars, file_object, progress_bar,
+                previous_results_dir=_prior_dir,
             )
 
     return ops, st, clu, tF, Wall, similar_templates, \
@@ -198,14 +219,15 @@ def run_kilosort(settings, probe=None, probe_name=None, filename=None,
 
 def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
           clear_cache, invert_sign, save_preprocessed_copy, verbose_log,
-          save_extra_vars, file_object, progress_bar, gui_sorter=None):
+          save_extra_vars, file_object, progress_bar, gui_sorter=None,
+          previous_results_dir=None):
     """Run sorting pipeline. See `run_kilosort` for documentation.
-    
+
     Notes
     -----
     filename is expected to be a list of Paths at this point, even if it's
     a singleton list.
-    
+
     """
 
     try:
@@ -226,9 +248,12 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
                             'Specify `device` to change this.')
                 device = torch.device('cpu')
 
-        if device != torch.device('cpu'):
+        if device == torch.device('cuda'):
             memory = torch.cuda.get_device_properties(device).total_memory/1024**3
             logger.info(f'Using CUDA device: {torch.cuda.get_device_name()} {memory:.2f}GB')
+        elif device == torch.device('mps'):
+            memory = torch.mps.recommended_max_memory()/1024**3
+            logger.info(f'Using MSP device: {memory:.2f}GB')
 
         logger.info('-'*40)
         if len(filename) == 1:
@@ -259,20 +284,31 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
             settings, probe, data_dtype, do_CAR, invert_sign,
             device, save_preprocessed_copy, gui_mode=(gui_sorter is not None)
             )
-        
+
         # Pretty-print ops and probe for log
         logger.debug(f"Initial ops:\n\n{ops_as_string(ops)}\n")
         logger.debug(f"Probe dictionary:\n\n{probe_as_string(ops['probe'])}\n")
+
+        prior = None
+        if previous_results_dir is not None:
+            prior = io.load_prior_templates(previous_results_dir, ops, device)
+            ops['wPCA'], ops['wTEMP'] = prior['wPCA'], prior['wTEMP']
+            ops['prior_basis'] = True
+            logger.info(f"Reusing {prior['Wall'].shape[0]} templates from "
+                        f"{previous_results_dir}")
 
         # Baseline performance metrics
         log_performance(logger, 'info', 'Resource usage before sorting')
         log_thread_count(logger)
 
         # Set preprocessing and drift correction parameters
-        ops = compute_preprocessing(ops, device, tic0=tic0, file_object=file_object)
+        ops = compute_preprocessing(
+            ops, device, tic0=tic0, file_object=file_object,
+            whiten_mat=None if prior is None else prior['whiten_mat']
+            )
         np.random.seed(1)
         torch.cuda.manual_seed_all(1)
-        torch.random.manual_seed(1) 
+        torch.random.manual_seed(1)
         ops, bfile, st0 = compute_drift_correction(
             ops, device, tic0=tic0, progress_bar=progress_bar,
             file_object=file_object, clear_cache=clear_cache,
@@ -301,7 +337,8 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
         # Sort spikes and save results
         st,tF, Wall0, clu0 = detect_spikes(
             ops, device, bfile, tic0=tic0, progress_bar=progress_bar,
-            clear_cache=clear_cache, verbose=verbose_log
+            clear_cache=clear_cache, verbose=verbose_log,
+            prior_Wall=None if prior is None else prior['Wall']
             )
 
         log_thread_count(logger)
@@ -315,10 +352,17 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
         else:
             kplots.plot_diagnostics(Wall0, clu0, ops, results_dir)
 
-        clu, Wall, st, tF = cluster_spikes(
-            st, tF, ops, device, bfile, tic0=tic0, progress_bar=progress_bar,
-            clear_cache=clear_cache, verbose=verbose_log,
-            )
+        if prior is None:
+            clu, Wall, st, tF = cluster_spikes(
+                st, tF, ops, device, bfile, tic0=tic0, progress_bar=progress_bar,
+                clear_cache=clear_cache, verbose=verbose_log,
+                )
+        else:
+            clu, Wall, st, tF = cluster_spikes_with_prior(
+                st, tF, ops, prior['Wall'], device, bfile, tic0=tic0,
+                progress_bar=progress_bar, clear_cache=clear_cache,
+                verbose=verbose_log,
+                )
 
         log_thread_count(logger)
 
@@ -343,7 +387,7 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
             kplots.plot_spike_positions(clu[kept_spikes], is_ref, results_dir)
         logger.info('Sorting finished.')
         log_sorting_summary(ops, log=logger, level='info')
-        
+
     except Exception as e:
         if isinstance(e, torch.cuda.OutOfMemoryError):
             logger.exception('Out of memory error, printing performance...')
@@ -355,7 +399,7 @@ def _sort(filename, results_dir, probe, settings, data_dtype, device, do_CAR,
         # Annoyingly, this will print the error message twice for console, but
         # I haven't found a good way around that.
         raise
-    
+
     finally:
         close_logger()
 
@@ -368,8 +412,8 @@ def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
               bad_channels, shank_idx):
     """Parse file and directory information for data, probe, and results."""
 
-    # Check for filename 
-    filename = settings.get('filename', None) if filename is None else filename 
+    # Check for filename
+    filename = settings.get('filename', None) if filename is None else filename
 
     # Use data_dir if filename not available
     if filename is None:
@@ -391,7 +435,7 @@ def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
             if not f.exists():
                 raise FileExistsError(f"filename '{filename}' does not exist")
         data_dir = filename[0].parent
-        
+
     # Convert paths to strings when saving to ops, otherwise ops can only
     # be loaded on the operating system that originally ran the code.
     settings['filename'] = filename
@@ -406,7 +450,7 @@ def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
         results_dir = results_dir / f'shank_{shank_idx}'
     # Make sure results directory exists
     results_dir.mkdir(exist_ok=True, parents=True)
-    
+
     # find probe configuration file and load
     if probe is None:
         if probe_name is not None:     probe_path = PROBE_DIR / probe_name
@@ -415,7 +459,7 @@ def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
         else: raise ValueError('no probe_name or probe_path provided, set probe_name=')
         if not probe_path.exists():
             raise FileExistsError(f"probe_path '{probe_path}' does not exist")
-        
+
         probe  = io.load_probe(probe_path)
     else:
         # Make sure xc, yc are float32, otherwise there are casting problems
@@ -441,7 +485,7 @@ def set_files(settings, filename, probe, probe_name, data_dir, results_dir,
 
 def setup_logger(results_dir, verbose_console=False):
     results_dir = Path(results_dir)
-    
+
     # Get root logger for Kilosort application
     ks_log = logging.getLogger('kilosort')
     ks_log.setLevel(logging.DEBUG)
@@ -496,7 +540,7 @@ def initialize_ops(settings, probe, data_dtype, do_CAR, invert_sign,
 
     if settings['nearest_chans'] > len(probe['chanMap']):
         msg = f"""
-            Parameter `nearest_chans` must be less than or equal to the number 
+            Parameter `nearest_chans` must be less than or equal to the number
             of data channels being sorted.\n
             Changing from {settings['nearest_chans']} to {len(probe['chanMap'])}.
             """
@@ -505,8 +549,8 @@ def initialize_ops(settings, probe, data_dtype, do_CAR, invert_sign,
 
     if 'duplicate_spike_bins' in settings:
         msg = """
-            The `duplicate_spike_bins` parameter has been replaced with 
-            `duplicate_spike_ms`. Specifying the former will have no effect, 
+            The `duplicate_spike_bins` parameter has been replaced with
+            `duplicate_spike_ms`. Specifying the former will have no effect,
             since it gets overwritten based on sampling rate.
             """
         warnings.warn(msg, DeprecationWarning)
@@ -578,7 +622,8 @@ def get_run_parameters(ops) -> list:
     return parameters
 
 
-def compute_preprocessing(ops, device, tic0=np.nan, file_object=None):
+def compute_preprocessing(ops, device, tic0=np.nan, file_object=None,
+                          whiten_mat=None):
     """Compute preprocessing parameters and save them to `ops`.
 
     Parameters
@@ -593,11 +638,13 @@ def compute_preprocessing(ops, device, tic0=np.nan, file_object=None):
         Must have 'shape' and 'dtype' attributes and support array-like
         indexing (e.g. [:100,:], [5, 7:10], etc). For example, a numpy
         array or memmap.
+    whiten_mat : torch.Tensor; optional.
+        If given, used instead of computing a whitening matrix from the data.
 
     Returns
     -------
     ops : dict
-    
+
     """
 
     tic = time.time()
@@ -610,7 +657,7 @@ def compute_preprocessing(ops, device, tic0=np.nan, file_object=None):
             get_run_parameters(ops)
     nskip = ops['settings']['nskip']
     whitening_range = ops['settings']['whitening_range']
-    
+
     # Compute high pass filter
     cutoff = ops['settings']['highpass_cutoff']
     hp_filter = preprocessing.get_highpass_filter(fs, cutoff, device=device)
@@ -626,8 +673,11 @@ def compute_preprocessing(ops, device, tic0=np.nan, file_object=None):
     logger.info(f'N seconds: {bfile.n_samples/fs}')
     logger.info(f'N batches: {bfile.n_batches}')
 
-    whiten_mat = preprocessing.get_whitening_matrix(bfile, xc, yc, nskip=nskip,
-                                                    nrange=whitening_range)
+    if whiten_mat is None:
+        whiten_mat = preprocessing.get_whitening_matrix(bfile, xc, yc, nskip=nskip,
+                                                        nrange=whitening_range)
+    else:
+        logger.info('Using whitening matrix from previous results.')
 
 
     # Save results
@@ -689,7 +739,7 @@ def compute_drift_correction(ops, device, tic0=np.nan, progress_bar=None,
     st0 : np.ndarray.
         Intermediate spike times variable with 6 columns. This is only used
         for generating the 'Drift Scatter' plot through the GUI.
-    
+
     """
 
     tic = time.time()
@@ -703,7 +753,7 @@ def compute_drift_correction(ops, device, tic0=np.nan, progress_bar=None,
     hp_filter = ops['preprocessing']['hp_filter']
     whiten_mat = ops['preprocessing']['whiten_mat']
     bfile = io.BinaryFiltered(
-        ops['filename'], n_chan_bin, fs, NT, nt, twav_min, chan_map, 
+        ops['filename'], n_chan_bin, fs, NT, nt, twav_min, chan_map,
         hp_filter=hp_filter, whiten_mat=whiten_mat, device=device, do_CAR=do_CAR,
         invert_sign=invert, dtype=dtype, tmin=tmin, tmax=tmax,
         artifact_threshold=artifact, shift=shift, scale=scale,
@@ -712,7 +762,7 @@ def compute_drift_correction(ops, device, tic0=np.nan, progress_bar=None,
 
     ops, st = datashift.run(ops, bfile, device=device, progress_bar=progress_bar,
                             clear_cache=clear_cache, verbose=verbose)
-    
+
     elapsed = time.time() - tic
     total = time.time() - tic0
     ops['runtime_drift'] = elapsed
@@ -726,10 +776,10 @@ def compute_drift_correction(ops, device, tic0=np.nan, progress_bar=None,
         logger.debug(f'yblk shape: {ops["yblk"].shape}')
         logger.debug(f'dshift shape: {ops["dshift"].shape}')
         logger.debug(f'iKxx shape: {ops["iKxx"].shape}')
-    
+
     # binary file with drift correction
     bfile = io.BinaryFiltered(
-        ops['filename'], n_chan_bin, fs, NT, nt, twav_min, chan_map, 
+        ops['filename'], n_chan_bin, fs, NT, nt, twav_min, chan_map,
         hp_filter=hp_filter, whiten_mat=whiten_mat, device=device,
         dshift=ops['dshift'], do_CAR=do_CAR, dtype=dtype, tmin=tmin, tmax=tmax,
         artifact_threshold=artifact, shift=shift, scale=scale,
@@ -744,9 +794,9 @@ def compute_drift_correction(ops, device, tic0=np.nan, progress_bar=None,
 
 
 def detect_spikes(ops, device, bfile, tic0=np.nan, progress_bar=None,
-                  clear_cache=False, verbose=False):
+                  clear_cache=False, verbose=False, prior_Wall=None):
     """Detect spikes via template deconvolution.
-    
+
     Parameters
     ----------
     ops : dict
@@ -764,6 +814,9 @@ def detect_spikes(ops, device, bfile, tic0=np.nan, progress_bar=None,
         memory-intensive steps in the pipeline.
     verbose : bool; False.
         If true, include additional debug-level logging statements.
+    prior_Wall : torch.Tensor; optional.
+        Templates from a previous sort. They are matched first (indices 0..N-1),
+        together with any new candidate templates that don't duplicate them.
 
     Returns
     -------
@@ -798,7 +851,7 @@ def detect_spikes(ops, device, bfile, tic0=np.nan, progress_bar=None,
     ops['usage_st0'] = get_performance()
     if torch.cuda.is_available():
         ops['cuda_st0'] = torch.cuda.memory_stats(device)
-    logger.info(f'{len(st0)} spikes extracted in {elapsed:.2f}s; ' + 
+    logger.info(f'{len(st0)} spikes extracted in {elapsed:.2f}s; ' +
                 f'total {total:.2f}s')
     logger.debug(f'st0 shape: {st0.shape}')
     logger.debug(f'tF shape: {tF.shape}')
@@ -832,17 +885,30 @@ def detect_spikes(ops, device, bfile, tic0=np.nan, progress_bar=None,
     logger.debug(f'Wall shape: {Wall.shape}')
     log_performance(logger, 'info', 'Resource usage after first clustering',
                     reset=True)
-   
+
     log_thread_count(logger)
 
     tic = time.time()
     logger.info(' ')
     logger.info('Extracting spikes using cluster waveforms')
     logger.info('-'*40)
+    U = Wall3
+    if prior_Wall is not None:
+        # LAYOUT: `Wall3` (and so `U`, as `template_matching.extract` expects) is
+        # (units, n_pcs, Nchan) after `postprocess_templates`. `prior_Wall` and
+        # both prior helpers use the saved layout (units, Nchan, n_pcs).
+        n_cand = Wall3.shape[0]
+        cand = template_matching.drop_prior_duplicates(
+            prior_Wall, Wall3.transpose(1, 2), ops
+            )
+        logger.info(f'{n_cand - cand.shape[0]} of {n_cand} new templates '
+                    f'duplicate previous units; {cand.shape[0]} kept.')
+        U = torch.cat((prior_Wall.transpose(1, 2).to(Wall3.device),
+                       cand.transpose(1, 2)), 0).contiguous()
     st, tF, ops = template_matching.extract(
-        ops, bfile, Wall3, device=device, progress_bar=progress_bar
+        ops, bfile, U, device=device, progress_bar=progress_bar
         )
-   
+
     log_thread_count(logger)
 
     elapsed = time.time() - tic
@@ -868,7 +934,7 @@ def detect_spikes(ops, device, bfile, tic0=np.nan, progress_bar=None,
 def cluster_spikes(st, tF, ops, device, bfile, tic0=np.nan, progress_bar=None,
                    clear_cache=False, verbose=False):
     """Cluster spikes using graph-based methods.
-    
+
     Parameters
     ----------
     st : np.ndarray
@@ -901,7 +967,7 @@ def cluster_spikes(st, tF, ops, device, bfile, tic0=np.nan, progress_bar=None,
     Wall : torch.Tensor
         PC feature representation of spike waveforms for each cluster, with shape
         (n_clusters, n_channels, n_pcs).
-    
+
     """
     tic = time.time()
     logger.info(' ')
@@ -911,14 +977,14 @@ def cluster_spikes(st, tF, ops, device, bfile, tic0=np.nan, progress_bar=None,
         ops, st, tF,  mode = 'template', device=device, progress_bar=progress_bar,
         clear_cache=clear_cache, verbose=verbose
         )
-    
+
     elapsed = time.time() - tic
     total = time.time() - tic0
     ops['runtime_clu'] = elapsed
     ops['usage_clu'] = get_performance()
     if torch.cuda.is_available():
         ops['cuda_clu'] = torch.cuda.memory_stats(device)
-    logger.info(f'{clu.max()+1} clusters found, in {elapsed:.2f}s; ' + 
+    logger.info(f'{clu.max()+1} clusters found, in {elapsed:.2f}s; ' +
                 f'total {total:.2f}s')
     logger.debug(f'clu shape: {clu.shape}')
     logger.debug(f'Wall shape: {Wall.shape}')
@@ -939,7 +1005,7 @@ def cluster_spikes(st, tF, ops, device, bfile, tic0=np.nan, progress_bar=None,
     ops['usage_merge'] = get_performance()
     if torch.cuda.is_available():
         ops['cuda_merge'] = torch.cuda.memory_stats(device)
-    logger.info(f'{clu.max()+1} units found, in {elapsed:.2f}s; ' + 
+    logger.info(f'{clu.max()+1} units found, in {elapsed:.2f}s; ' +
                 f'total {total:.2f}s')
     logger.debug(f'clu shape: {clu.shape}')
     logger.debug(f'Wall shape: {Wall.shape}')
@@ -951,9 +1017,84 @@ def cluster_spikes(st, tF, ops, device, bfile, tic0=np.nan, progress_bar=None,
     return clu, Wall, st, tF
 
 
+def cluster_spikes_with_prior(st, tF, ops, prior_Wall, device, bfile,
+                              tic0=np.nan, progress_bar=None,
+                              clear_cache=False, verbose=False):
+    """Keep prior unit IDs for spikes matched to prior templates and cluster
+    the remaining spikes into new units numbered after the prior ones.
+
+    Spikes with `st[:,1] < len(prior_Wall)` were matched to prior template
+    `st[:,1]` by `template_matching.extract`, so that is their unit ID.
+
+    """
+    N = prior_Wall.shape[0]
+    is_prior = st[:, 1] < N
+    clu = np.full(len(st), -1, 'int32')
+    clu[is_prior] = st[is_prior, 1].astype('int32')
+    Wall_prior = template_matching.reestimate_prior_templates(
+        prior_Wall, clu, tF, ops['iCC'], ops['iU']
+        )
+    logger.info(f'{int(is_prior.sum())} spikes assigned to '
+                f'{np.unique(clu[is_prior]).size} of {N} previous units')
+
+    Wall_new = torch.zeros((0, *prior_Wall.shape[1:]))
+    new = ~is_prior
+    if new.any():
+        new_t = torch.from_numpy(new)
+        try:
+            clu_new, Wall_new, st_new, tF_new = cluster_spikes(
+                st[new], tF[new_t], ops, device, bfile, tic0=tic0,
+                progress_bar=progress_bar, clear_cache=clear_cache,
+                verbose=verbose
+                )
+        except ValueError as e:
+            # Only the "nothing to cluster" errors raised on purpose by
+            # `clustering_qr.run`; anything else is a real bug.
+            if not any(m in str(e) for m in (
+                    'Wall is empty', '`get_data_cpu` never found suitable channels'
+                    )):
+                raise
+            if not is_prior.any():
+                raise  # nothing left to sort
+            logger.warning(f'Could not cluster {int(new.sum())} spikes that did '
+                           f'not match previous units ({e}); dropping them.')
+            keep = torch.from_numpy(is_prior)
+            st, tF, clu = st[is_prior], tF[keep], clu[is_prior]
+        else:
+            st[new] = st_new
+            tF[new_t] = tF_new  # updates the caller's tF in place
+            clu[new] = clu_new + N
+
+    # CPU, like `cluster_spikes` (`merging_function` returns `Ww.cpu()`)
+    Wall = torch.cat((Wall_prior.cpu(), Wall_new.cpu()), 0)
+    isort = np.argsort(st[:, 0], kind='stable')
+    return clu[isort], Wall, st[isort], tF[torch.from_numpy(isort)]
+
+
+def _check_prior_dir(prior_dir, results_dir):
+    """Refuse to write results over the previous results being read."""
+    if prior_dir is not None and \
+            Path(prior_dir).resolve() == Path(results_dir).resolve():
+        raise ValueError(
+            f"`previous_results_dir` and `results_dir` are the same folder "
+            f"('{results_dir}'); the new run would overwrite the results it "
+            "reuses. Set a different `results_dir`."
+            )
+
+
+def _prior_dir_for_shank(previous_results_dir, shank_idx):
+    """Mirror `set_files`: results for shank i live in `results_dir/shank_i`."""
+    if previous_results_dir is None:
+        return None
+    prior_dir = Path(previous_results_dir)
+    if shank_idx is not None:
+        prior_dir = prior_dir / f'shank_{shank_idx}'
+    return prior_dir
+
+
 def save_sorting(ops, results_dir, st, clu, tF, Wall, imin, tic0=np.nan,
                  save_extra_vars=False, save_preprocessed_copy=False,
-                 skip_dat_path=False):  
+                 skip_dat_path=False):
     """Save sorting results, and format them for use with Phy
 
     Parameters
@@ -1030,8 +1171,8 @@ def save_sorting(ops, results_dir, st, clu, tF, Wall, imin, tic0=np.nan,
             skip_dat_path=skip_dat_path
             )
     logger.info(f'{int(is_ref.sum())} units found with good refractory periods')
-    
-    ops['n_units_total'] = np.unique(clu).size
+
+    ops['n_units_total'] = Wall.shape[0]  # == number of unique ids unless some units are empty
     ops['n_units_good'] = int(is_ref.sum())
     ops['n_spikes'] = st[kept_spikes].shape[0]
     if ops.get('dshift', None) is not None:
@@ -1052,7 +1193,7 @@ def save_sorting(ops, results_dir, st, clu, tF, Wall, imin, tic0=np.nan,
 
     logger.info(f'Total runtime: {runtime:.2f}s = {int(hrs):02d}:' +
                 f'{int(mins):02d}:{round(seconds)} h:m:s')
-    ops['runtime'] = runtime 
+    ops['runtime'] = runtime
     io.save_ops(ops, results_dir)
     logger.info(f'Sorting output saved in: {results_dir}.')
 
@@ -1065,7 +1206,7 @@ def save_sorting(ops, results_dir, st, clu, tF, Wall, imin, tic0=np.nan,
 
 def load_sorting(results_dir, device=None, load_extra_vars=False):
     '''Load saved sorting results into memory.
-    
+
     Parameters
     ----------
     results_dir : str or pathlib.Path
@@ -1125,7 +1266,7 @@ def load_sorting(results_dir, device=None, load_extra_vars=False):
         Per-spike amplitudes, computed as the L2 norm of the PC features
         for each spike.
         Includes spikes removed by `kilosort.postprocessing.remove_duplicate_spikes`.
-    
+
     '''
     if device is None:
         if torch.cuda.is_available():
@@ -1142,9 +1283,10 @@ def load_sorting(results_dir, device=None, load_extra_vars=False):
     kept_spikes = np.load(results_dir / 'kept_spikes.npy')
     acg_threshold = ops['settings']['acg_threshold']
     ccg_threshold = ops['settings']['ccg_threshold']
-    is_ref, est_contam_rate = CCG.refract(clu, st / ops['fs'],
-                                          acg_threshold=acg_threshold,
-                                          ccg_threshold=ccg_threshold)
+    is_ref, est_contam_rate = CCG.refract(
+        clu, st / ops['fs'], acg_threshold=acg_threshold,
+        ccg_threshold=ccg_threshold, n_units=similar_templates.shape[0]
+        )
 
     results = [ops, st, clu, similar_templates, is_ref,
                est_contam_rate, kept_spikes]

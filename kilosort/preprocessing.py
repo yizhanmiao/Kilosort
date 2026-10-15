@@ -62,7 +62,7 @@ def get_drift_matrix(ops, dshift, device=torch.device('cuda')):
 
     # the kernel is radial symmetric based on distance
     Kyx = kernel2D_torch(yp, xp, ops['settings']['sig_interp'])
-    
+
     # multiply with precomputed inverse kernel matrix of original channels
     M = Kyx @ ops['iKxx']
 
@@ -71,7 +71,7 @@ def get_drift_matrix(ops, dshift, device=torch.device('cuda')):
 
 def get_fwav(NT = 30122, fs = 30000, device=torch.device('cuda')):
     """Precomputes a filter to use for high-pass filtering.
-    
+
     To be used with fft in pytorch. Currently depends on NT,
     but it could get padded for larger NT.
 
@@ -79,11 +79,11 @@ def get_fwav(NT = 30122, fs = 30000, device=torch.device('cuda')):
 
     # a butterworth filter is specified in scipy
     b,a = butter(3, 300, fs = fs, btype = 'high')
-    
+
     # a signal with a single entry is used to compute the impulse response
     x = np.zeros(NT)
     x[NT//2] = 1
-    
+
     # symmetric filter from scipy
     wav = filtfilt(b,a , x).copy()
     wav = torch.from_numpy(wav).to(device).float()
@@ -101,16 +101,16 @@ def get_whitening_matrix(f, xc, yc, nskip=25, nrange=32):
     k = 0
     for j in range(0, f.n_batches-1, nskip):
         # load data with high-pass filtering (see the Binary file class)
-        X = f.padded_batch_to_torch(j)        
-        
+        X = f.padded_batch_to_torch(j)
+
         # remove padding
         X = X[:, f.nt : -f.nt]
 
         # cumulative covariance matrix
         CC = CC + (X @ X.T)/X.shape[1]
-        
+
         k+=1
-        
+
     CC = CC / k
 
     # compute the local whitening filters and collect back into Wrot
@@ -121,7 +121,7 @@ def get_whitening_matrix(f, xc, yc, nskip=25, nrange=32):
 def get_highpass_filter(fs=30000, cutoff=300, device=torch.device('cuda')):
     """Filter to use for high-pass filtering."""
     NT = 30122
-    
+
     # a butterworth filter is specified in scipy
     b,a = butter(3, cutoff, fs=fs, btype='high')
 
@@ -131,7 +131,7 @@ def get_highpass_filter(fs=30000, cutoff=300, device=torch.device('cuda')):
 
     # symmetric filter from scipy
     hp_filter = filtfilt(b, a , x).copy()
-    
+
     hp_filter = torch.from_numpy(hp_filter).to(device).float()
     return hp_filter
 
@@ -143,11 +143,11 @@ def fft_highpass(hp_filter, NT=30122):
     # the filter is padded or cropped depending on the size of NT
     if ft < NT:
         pad = (NT - ft) // 2
-        fhp = fft(torch.cat((torch.zeros(pad, device=device), 
+        fhp = fft(torch.cat((torch.zeros(pad, device=device),
                              hp_filter,
                              torch.zeros(pad + (NT-pad*2-ft), device=device))))
     elif ft > NT:
-        crop = (ft - NT) // 2 
+        crop = (ft - NT) // 2
         fhp = fft(hp_filter[crop : crop + NT])
     else:
         fhp = fft(hp_filter)
