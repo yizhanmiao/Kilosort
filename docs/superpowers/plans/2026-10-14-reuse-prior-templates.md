@@ -534,11 +534,17 @@ Change the signature to `def detect_spikes(ops, device, bfile, tic0=np.nan, prog
 ```python
     U = Wall3
     if prior_Wall is not None:
+        # LAYOUT: `Wall3` (and so `U`, as `template_matching.extract` expects) is
+        # (units, n_pcs, Nchan) after `postprocess_templates`. `prior_Wall` and
+        # both Task 2 helpers use the saved layout (units, Nchan, n_pcs).
         n_cand = Wall3.shape[0]
-        Wall3 = template_matching.drop_prior_duplicates(prior_Wall, Wall3, ops)
-        logger.info(f'{n_cand - Wall3.shape[0]} of {n_cand} new templates '
-                    f'duplicate previous units; {Wall3.shape[0]} kept.')
-        U = torch.cat((prior_Wall.to(Wall3.device), Wall3), 0)
+        cand = template_matching.drop_prior_duplicates(
+            prior_Wall, Wall3.transpose(1, 2), ops
+            )
+        logger.info(f'{n_cand - cand.shape[0]} of {n_cand} new templates '
+                    f'duplicate previous units; {cand.shape[0]} kept.')
+        U = torch.cat((prior_Wall.transpose(1, 2).to(Wall3.device),
+                       cand.transpose(1, 2)), 0).contiguous()
     st, tF, ops = template_matching.extract(
         ops, bfile, U, device=device, progress_bar=progress_bar
         )
@@ -642,65 +648,63 @@ git commit -m "feat: run_kilosort reuses templates from previous_results_dir"
   - `run_kilosort(..., results_dir=..., previous_results_dir=...)` (Task 3)
   - existing fixtures `data_directory`, `results_directory`, `torch_device`, `capture_mgr`, and pytest's `tmp_path`
 
-- [ ] **Step 1: Confirm the saved reference results contain what the loader needs**
+- [ ] **Step 1: Find the recording length**
 
-Run: `pytest tests/test_full_pipeline.py --runslow -k "test_pipeline and not prior" -q` (downloads the data on first run). Then:
-
-```bash
-ls ~/.kilosort/.test_data/saved_results/ | grep -E "ops.npy|templates.npy|spike_clusters.npy"
-```
-
-Expected: all three files are listed. If the data lives somewhere else, find it with the `data_directory` fixture in `tests/conftest.py`. If `ops.npy` lacks `wPCA`, stop and report it, because the reference results predate saving the basis.
+The test splits the recording in halves with `tmin`/`tmax` (seconds), which keeps each run short. Get the duration from the file size: `file_size / (385 channels * 2 bytes * 30000 Hz)`. The data downloads on first use (see `data_directory` in `tests/conftest.py`). Hard-code half of that duration, rounded down, as `HALF` in the test.
 
 - [ ] **Step 2: Write the test** (append to `tests/test_full_pipeline.py`)
 
+The test builds its own earlier result, so it does not depend on the downloaded reference results.
+
 ```python
 @pytest.mark.slow
-def test_pipeline_with_prior(data_directory, results_directory, torch_device,
-                             tmp_path, capture_mgr):
+def test_pipeline_with_prior(data_directory, torch_device, tmp_path, capture_mgr):
     bin_file = data_directory / 'ZFM-02370_mini.imec0.ap.short.bin'
-    settings = {'n_chan_bin': 385, 'cluster_downsampling': 20,
-                'max_cluster_subset': None}
-    n_prev = np.load(results_directory / 'templates.npy').shape[0]
-    clu_prev = np.load(results_directory / 'spike_clusters.npy')
+    HALF = ...  # seconds: floor(file_size / (385 * 2 * 30000) / 2), see Step 1
 
-    with capture_mgr.global_and_fixture_disabled():
-        print('\nStarting run_kilosort with previous results...')
-        _, _, clu, _, Wall, _, _, _, kept = run_kilosort(
+    def sort(tmin, tmax, results_dir, prior=None):
+        settings = {'n_chan_bin': 385, 'cluster_downsampling': 20,
+                    'max_cluster_subset': None, 'tmin': tmin, 'tmax': tmax}
+        out = run_kilosort(
             filename=bin_file, device=torch_device, settings=settings,
-            probe_name='NeuroPix1_default.mat', results_dir=tmp_path / 'run1',
-            previous_results_dir=results_directory,
+            probe_name='NeuroPix1_default.mat', results_dir=results_dir,
+            previous_results_dir=prior,
             )
-    clu = clu[kept]
+        _, _, clu, _, Wall, _, _, _, kept = out
+        return clu[kept], Wall.shape[0]
 
-    # Prior units keep their rows; few new units appear
-    assert Wall.shape[0] >= n_prev
-    assert Wall.shape[0] - n_prev <= 0.1 * n_prev
-    # Most spikes land on prior unit IDs
-    assert np.mean(clu < n_prev) > 0.8
-    # Large prior units keep roughly the same spike count
-    ids, counts_prev = np.unique(clu_prev, return_counts=True)
-    counts_new = np.bincount(clu, minlength=Wall.shape[0])
-    big = counts_prev > 1000
-    rel = np.abs(counts_new[ids[big]] - counts_prev[big]) / counts_prev[big]
     with capture_mgr.global_and_fixture_disabled():
-        print(f'Relative spike-count change for {big.sum()} large units: '
+        print('\nSession 1: first half, normal sort')
+        clu1, n1 = sort(0, HALF, tmp_path / 'run1')
+        print('Session 1b: same data, templates from session 1')
+        clu1b, n1b = sort(0, HALF, tmp_path / 'run1b', prior=tmp_path / 'run1')
+        print('Session 2: second half, templates from session 1b')
+        clu2, n2 = sort(HALF, 2 * HALF, tmp_path / 'run2', prior=tmp_path / 'run1b')
+
+    # Same data again: prior units keep their IDs, few new units appear
+    assert n1b >= n1
+    assert n1b - n1 <= 0.1 * n1
+    assert np.mean(clu1b < n1) > 0.8
+    # Large units keep roughly the same spike count
+    counts1 = np.bincount(clu1, minlength=n1b)[:n1]
+    counts1b = np.bincount(clu1b, minlength=n1b)[:n1]
+    big = counts1 > 1000
+    assert big.any()
+    rel = np.abs(counts1b[big] - counts1[big]) / counts1[big]
+    with capture_mgr.global_and_fixture_disabled():
+        print(f'Relative spike-count change, {big.sum()} large units: '
               f'median {np.median(rel):.3f}, max {rel.max():.3f}')
     assert np.mean(rel < 0.2) >= 0.9
 
-    # Chaining: the new output can itself be used as the prior
-    _, _, _, _, Wall2, _, _, _, _ = run_kilosort(
-        filename=bin_file, device=torch_device, settings=settings,
-        probe_name='NeuroPix1_default.mat', results_dir=tmp_path / 'run2',
-        previous_results_dir=tmp_path / 'run1',
-        )
-    assert Wall2.shape[0] >= Wall.shape[0]
+    # Different data, chained: still mostly prior unit IDs, no units removed
+    assert n2 >= n1b
+    assert np.mean(clu2 < n1b) > 0.7
 ```
 
 - [ ] **Step 3: Run it**
 
-Run: `pytest tests/test_full_pipeline.py --runslow -k prior -v -s` (add `--gpu` on a CUDA machine)
-Expected: PASS, with the printed median relative change well under 0.2. If an assertion fails, report the printed numbers rather than loosening the bounds.
+Run: `pytest tests/test_full_pipeline.py --runslow -k prior -v -s` (add `--gpu` on a CUDA machine; on Apple Silicon the default device is fine).
+Expected: PASS, with the printed median relative change well under 0.2. If an assertion fails, report the printed numbers rather than loosening the bounds, and say which of the three runs failed.
 
 - [ ] **Step 4: Commit**
 
